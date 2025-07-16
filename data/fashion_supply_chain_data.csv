@@ -1,0 +1,131 @@
+product_id,product_name,category,subcategory,date,demand,price,lead_time,holding_cost,ordering_cost,warehouse_id,quantity_on_hand,min_stock,max_stock,supplier_id,supplier_reliability,backorder_rate
+F1001,Men's Premium T-Shirt,Apparel,Men's Clothing,2024-01-01,320,29.99,7,1.2,15,WH003,500,150,800,S201,0.97,0.01
+F1001,Men's Premium T-Shirt,Apparel,Men's Clothing,2024-01-15,295,29.99,7,1.2,15,WH003,420,150,800,S201,0.97,0.01
+F1001,Men's Premium T-Shirt,Apparel,Men's Clothing,2024-02-01,310,29.99,7,1.2,15,WH003,625,150,800,S201,0.97,0.01
+F1001,Men's Premium T-Shirt,Apparel,Men's Clothing,2024-02-15,325,29.99,7,1.2,15,WH003,535,150,800,S201,0.97,0.01
+F1001,Men's Premium T-Shirt,Apparel,Men's Clothing,2024-03-01,345,29.99,7,1.2,15,WH003,710,150,800,S201,0.97,0.01
+F1001,Men's Premium T-Shirt,Apparel,Men's Clothing,2024-03-15,365,29.99,7,1.2,15,WH003,605,150,800,S201,0.97,0.01
+F1001,Men's Premium T-Shirt,Apparel,Men's Clothing,2024-04-01,385,24.99,7,1.2,15,WH003,740,150,800,S201,0.98,0.00
+F1001,Men's Premium T-Shirt,Apparel,Men's Clothing,2024-04-15,410,24.99,7,1.2,15,WH003,580,150,800,S201,0.97,0.01
+F1001,Men's Premium T-Shirt,Apparel,Men's Clothing,2024-05-01,435,24.99,7,1.2,15,WH003,670,150,800,S201,0.98,0.00
+F1001,Men's Premium T-Shirt,Apparel,Men's Clothing,2024-05-15,458,24.99,7,1.2,15,WH003,485,150,800,S201,0.97,0.01
+F1001,Men's Premium T-Shirt,Apparel,Men's Clothing,2024-06-01,480,24.99,7,1.2,15,WH003,577,150,800,S201,0.98,0.00
+F1001,Men's Premium T-Shirt,Apparel,Men's Clothing,2024-06-15,495,19.99,7,1.2,15,WH003,382,150,800,S201,0.97,0.01
+F1001,Men's Premium T-Shirt,Apparel,Men's Clothing,2024-07-01,515,19.99,7,1.2,15,WH003,387,150,800,S201,0.98,0.00
+F1002,Women's Slim Jeans,Apparel,Women's Clothing,2024-01-01,280,59.99,10,2.5,25,WH003,420,120,600,S202,0.96,0.01
+F1002,Women's Slim Jeans,Apparel,Women's Clothing,2024-01-15,268,59.99,10,2.5,25,WH003,372,120,600,S202,0.96,0.01
+F1002,Women's Slim Jeans,Apparel,Women's Clothing,2024-02-01,272,59.99,10,2.5,25,WH003,504,120,600,S202,0.97,0.01
+F1002,Women's Slim Jeans,Apparel,Women's Clothing,2024-02-15,286,59.99,10,2.5,25,WH003,438,120,600,S202,0.96,0.01
+F1002,Women's Slim Jeans,Apparel,Women's Clothing,2024-03-01,302,49.99,10,2.5,25,WH003,552,120,600,S202,0.97,0.01
+F1002,Women's Slim Jeans,Apparel,Women's Clothing,2024-03-15,317,49.99,10,2.5,25,WH003,465,120,600,S202,0.96,0.01
+F1002,Women's Slim Jeans,Apparel,Women's Clothing,2024-04-01,325,49.99,10,2.5,25,WH003,548,120,600,S202,0.97,0.01
+F1002,Women's Slim Jeans,Apparel,Women's Clothing,2024-04-15,335,49.99,10,2.5,25,WH003,443,120,600,S202,0.96,0.01
+F1002,Women's Slim Jeans,Apparel,Women's Clothing,2024-05-01,348,49.99,10,2.5,25,WH003,508,120,600,S202,0.97,0.01
+F1002,Women's Slim Jeans,Apparel,Women's Clothing,2024-05-15,362,49.99,10,2.5,25,WH003,386,120,600,S202,0.96,0.01
+F1002,Women's Slim Jeans,Apparel,Women's Clothing,2024-06-01,378,39.99,10,2.5,25,WH003,424,120,600,S202,0.97,0.01
+F1002,Women's Slim Jeans,Apparel,Women's Clothing,2024-06-15,393,39.99,10,2.5,25,WH003,301,120,600,S202,0.96,0.01
+F1002,Women's Slim Jeans,Apparel,Women's Clothing,2024-07-01,410,39.99,10,2.5,25,WH003,308,120,600,S202,0.97,0.01
+F1003,Kids Colorful Hoodie,Apparel,Children's Clothing,2024-01-01,185,34.99,8,1.8,20,WH003,280,90,400,S203,0.98,0.00
+F1003,Kids Colorful Hoodie,Apparel,Children's Clothing,2024-01-15,172,34.99,8,1.8,20,WH003,245,90,400,S203,0.98,0.00
+F1003,Kids Colorful Hoodie,Apparel,Children's Clothing,2024-02-01,168,34.99,8,1.8,20,WH003,323,90,400,S203,0.99,0.00
+F1003,Kids Colorful Hoodie,Apparel,Children's Clothing,2024-02-15,175,34.99,8,1.8,20,WH003,278,90,400,S203,0.98,0.00
+F1003,Kids Colorful Hoodie,Apparel,Children's Clothing,2024-03-01,182,34.99,8,1.8,20,WH003,353,90,400,S203,0.99,0.00
+F1003,Kids Colorful Hoodie,Apparel,Children's Clothing,2024-03-15,190,29.99,8,1.8,20,WH003,293,90,400,S203,0.98,0.00
+F1003,Kids Colorful Hoodie,Apparel,Children's Clothing,2024-04-01,198,29.99,8,1.8,20,WH003,355,90,400,S203,0.99,0.00
+F1003,Kids Colorful Hoodie,Apparel,Children's Clothing,2024-04-15,206,29.99,8,1.8,20,WH003,279,90,400,S203,0.98,0.00
+F1003,Kids Colorful Hoodie,Apparel,Children's Clothing,2024-05-01,212,29.99,8,1.8,20,WH003,323,90,400,S203,0.99,0.00
+F1003,Kids Colorful Hoodie,Apparel,Children's Clothing,2024-05-15,204,29.99,8,1.8,20,WH003,251,90,400,S203,0.98,0.00
+F1003,Kids Colorful Hoodie,Apparel,Children's Clothing,2024-06-01,195,24.99,8,1.8,20,WH003,306,90,400,S203,0.99,0.00
+F1003,Kids Colorful Hoodie,Apparel,Children's Clothing,2024-06-15,187,24.99,8,1.8,20,WH003,249,90,400,S203,0.98,0.00
+F1003,Kids Colorful Hoodie,Apparel,Children's Clothing,2024-07-01,178,24.99,8,1.8,20,WH003,312,90,400,S203,0.99,0.00
+F1004,Women's Summer Dress,Apparel,Women's Clothing,2024-01-01,195,54.99,9,2.2,22,WH003,260,100,500,S202,0.95,0.02
+F1004,Women's Summer Dress,Apparel,Women's Clothing,2024-01-15,182,54.99,9,2.2,22,WH003,225,100,500,S202,0.95,0.02
+F1004,Women's Summer Dress,Apparel,Women's Clothing,2024-02-01,188,54.99,9,2.2,22,WH003,293,100,500,S202,0.96,0.01
+F1004,Women's Summer Dress,Apparel,Women's Clothing,2024-02-15,197,54.99,9,2.2,22,WH003,246,100,500,S202,0.95,0.02
+F1004,Women's Summer Dress,Apparel,Women's Clothing,2024-03-01,215,54.99,9,2.2,22,WH003,329,100,500,S202,0.96,0.01
+F1004,Women's Summer Dress,Apparel,Women's Clothing,2024-03-15,232,49.99,9,2.2,22,WH003,264,100,500,S202,0.95,0.02
+F1004,Women's Summer Dress,Apparel,Women's Clothing,2024-04-01,258,49.99,9,2.2,22,WH003,356,100,500,S202,0.96,0.01
+F1004,Women's Summer Dress,Apparel,Women's Clothing,2024-04-15,285,49.99,9,2.2,22,WH003,248,100,500,S202,0.95,0.02
+F1004,Women's Summer Dress,Apparel,Women's Clothing,2024-05-01,310,49.99,9,2.2,22,WH003,313,100,500,S202,0.96,0.01
+F1004,Women's Summer Dress,Apparel,Women's Clothing,2024-05-15,335,44.99,9,2.2,22,WH003,178,100,500,S202,0.95,0.02
+F1004,Women's Summer Dress,Apparel,Women's Clothing,2024-06-01,360,44.99,9,2.2,22,WH003,218,100,500,S202,0.96,0.01
+F1004,Women's Summer Dress,Apparel,Women's Clothing,2024-06-15,385,44.99,9,2.2,22,WH003,133,100,500,S202,0.95,0.02
+F1004,Women's Summer Dress,Apparel,Women's Clothing,2024-07-01,410,44.99,9,2.2,22,WH003,148,100,500,S202,0.96,0.01
+F1005,Men's Formal Shirt,Apparel,Men's Clothing,2024-01-01,230,44.99,8,1.9,18,WH003,350,120,550,S201,0.97,0.01
+F1005,Men's Formal Shirt,Apparel,Men's Clothing,2024-01-15,215,44.99,8,1.9,18,WH003,305,120,550,S201,0.97,0.01
+F1005,Men's Formal Shirt,Apparel,Men's Clothing,2024-02-01,225,44.99,8,1.9,18,WH003,390,120,550,S201,0.98,0.00
+F1005,Men's Formal Shirt,Apparel,Men's Clothing,2024-02-15,235,44.99,8,1.9,18,WH003,335,120,550,S201,0.97,0.01
+F1005,Men's Formal Shirt,Apparel,Men's Clothing,2024-03-01,248,44.99,8,1.9,18,WH003,400,120,550,S201,0.98,0.00
+F1005,Men's Formal Shirt,Apparel,Men's Clothing,2024-03-15,260,39.99,8,1.9,18,WH003,330,120,550,S201,0.97,0.01
+F1005,Men's Formal Shirt,Apparel,Men's Clothing,2024-04-01,275,39.99,8,1.9,18,WH003,395,120,550,S201,0.98,0.00
+F1005,Men's Formal Shirt,Apparel,Men's Clothing,2024-04-15,290,39.99,8,1.9,18,WH003,315,120,550,S201,0.97,0.01
+F1005,Men's Formal Shirt,Apparel,Men's Clothing,2024-05-01,305,39.99,8,1.9,18,WH003,375,120,550,S201,0.98,0.00
+F1005,Men's Formal Shirt,Apparel,Men's Clothing,2024-05-15,320,39.99,8,1.9,18,WH003,285,120,550,S201,0.97,0.01
+F1005,Men's Formal Shirt,Apparel,Men's Clothing,2024-06-01,335,34.99,8,1.9,18,WH003,365,120,550,S201,0.98,0.00
+F1005,Men's Formal Shirt,Apparel,Men's Clothing,2024-06-15,350,34.99,8,1.9,18,WH003,265,120,550,S201,0.97,0.01
+F1005,Men's Formal Shirt,Apparel,Men's Clothing,2024-07-01,365,34.99,8,1.9,18,WH003,315,120,550,S201,0.98,0.00
+F1006,Women's Active Leggings,Apparel,Women's Clothing,2024-01-01,275,39.99,7,1.6,16,WH003,420,140,650,S204,0.97,0.01
+F1006,Women's Active Leggings,Apparel,Women's Clothing,2024-01-15,265,39.99,7,1.6,16,WH003,375,140,650,S204,0.97,0.01
+F1006,Women's Active Leggings,Apparel,Women's Clothing,2024-02-01,273,39.99,7,1.6,16,WH003,460,140,650,S204,0.98,0.00
+F1006,Women's Active Leggings,Apparel,Women's Clothing,2024-02-15,285,39.99,7,1.6,16,WH003,405,140,650,S204,0.97,0.01
+F1006,Women's Active Leggings,Apparel,Women's Clothing,2024-03-01,298,39.99,7,1.6,16,WH003,470,140,650,S204,0.98,0.00
+F1006,Women's Active Leggings,Apparel,Women's Clothing,2024-03-15,312,34.99,7,1.6,16,WH003,402,140,650,S204,0.97,0.01
+F1006,Women's Active Leggings,Apparel,Women's Clothing,2024-04-01,328,34.99,7,1.6,16,WH003,474,140,650,S204,0.98,0.00
+F1006,Women's Active Leggings,Apparel,Women's Clothing,2024-04-15,345,34.99,7,1.6,16,WH003,389,140,650,S204,0.97,0.01
+F1006,Women's Active Leggings,Apparel,Women's Clothing,2024-05-01,362,34.99,7,1.6,16,WH003,444,140,650,S204,0.98,0.00
+F1006,Women's Active Leggings,Apparel,Women's Clothing,2024-05-15,380,34.99,7,1.6,16,WH003,344,140,650,S204,0.97,0.01
+F1006,Women's Active Leggings,Apparel,Women's Clothing,2024-06-01,368,29.99,7,1.6,16,WH003,426,140,650,S204,0.98,0.00
+F1006,Women's Active Leggings,Apparel,Women's Clothing,2024-06-15,355,29.99,7,1.6,16,WH003,351,140,650,S204,0.97,0.01
+F1006,Women's Active Leggings,Apparel,Women's Clothing,2024-07-01,343,29.99,7,1.6,16,WH003,458,140,650,S204,0.98,0.00
+F1007,Unisex Winter Jacket,Apparel,Outerwear,2024-01-01,325,99.99,12,4.5,35,WH004,400,100,450,S205,0.94,0.02
+F1007,Unisex Winter Jacket,Apparel,Outerwear,2024-01-15,340,99.99,12,4.5,35,WH004,325,100,450,S205,0.94,0.02
+F1007,Unisex Winter Jacket,Apparel,Outerwear,2024-02-01,320,99.99,12,4.5,35,WH004,385,100,450,S205,0.95,0.01
+F1007,Unisex Winter Jacket,Apparel,Outerwear,2024-02-15,295,99.99,12,4.5,35,WH004,330,100,450,S205,0.94,0.02
+F1007,Unisex Winter Jacket,Apparel,Outerwear,2024-03-01,260,89.99,12,4.5,35,WH004,370,100,450,S205,0.95,0.01
+F1007,Unisex Winter Jacket,Apparel,Outerwear,2024-03-15,235,89.99,12,4.5,35,WH004,335,100,450,S205,0.94,0.02
+F1007,Unisex Winter Jacket,Apparel,Outerwear,2024-04-01,210,89.99,12,4.5,35,WH004,390,100,450,S205,0.95,0.01
+F1007,Unisex Winter Jacket,Apparel,Outerwear,2024-04-15,185,89.99,12,4.5,35,WH004,365,100,450,S205,0.94,0.02
+F1007,Unisex Winter Jacket,Apparel,Outerwear,2024-05-01,165,79.99,12,4.5,35,WH004,410,100,450,S205,0.95,0.01
+F1007,Unisex Winter Jacket,Apparel,Outerwear,2024-05-15,145,79.99,12,4.5,35,WH004,395,100,450,S205,0.94,0.02
+F1007,Unisex Winter Jacket,Apparel,Outerwear,2024-06-01,130,79.99,12,4.5,35,WH004,425,100,450,S205,0.95,0.01
+F1007,Unisex Winter Jacket,Apparel,Outerwear,2024-06-15,120,69.99,12,4.5,35,WH004,415,100,450,S205,0.94,0.02
+F1007,Unisex Winter Jacket,Apparel,Outerwear,2024-07-01,115,69.99,12,4.5,35,WH004,430,100,450,S205,0.95,0.01
+F1008,Children's School Backpack,Accessories,Kids Accessories,2024-01-01,165,29.99,9,1.4,18,WH004,250,80,350,S203,0.98,0.00
+F1008,Children's School Backpack,Accessories,Kids Accessories,2024-01-15,155,29.99,9,1.4,18,WH004,235,80,350,S203,0.98,0.00
+F1008,Children's School Backpack,Accessories,Kids Accessories,2024-02-01,145,29.99,9,1.4,18,WH004,280,80,350,S203,0.99,0.00
+F1008,Children's School Backpack,Accessories,Kids Accessories,2024-02-15,135,29.99,9,1.4,18,WH004,265,80,350,S203,0.98,0.00
+F1008,Children's School Backpack,Accessories,Kids Accessories,2024-03-01,125,29.99,9,1.4,18,WH004,300,80,350,S203,0.99,0.00
+F1008,Children's School Backpack,Accessories,Kids Accessories,2024-03-15,120,29.99,9,1.4,18,WH004,290,80,350,S203,0.98,0.00
+F1008,Children's School Backpack,Accessories,Kids Accessories,2024-04-01,135,29.99,9,1.4,18,WH004,310,80,350,S203,0.99,0.00
+F1008,Children's School Backpack,Accessories,Kids Accessories,2024-04-15,155,29.99,9,1.4,18,WH004,285,80,350,S203,0.98,0.00
+F1008,Children's School Backpack,Accessories,Kids Accessories,2024-05-01,175,24.99,9,1.4,18,WH004,280,80,350,S203,0.99,0.00
+F1008,Children's School Backpack,Accessories,Kids Accessories,2024-05-15,195,24.99,9,1.4,18,WH004,245,80,350,S203,0.98,0.00
+F1008,Children's School Backpack,Accessories,Kids Accessories,2024-06-01,215,24.99,9,1.4,18,WH004,260,80,350,S203,0.99,0.00
+F1008,Children's School Backpack,Accessories,Kids Accessories,2024-06-15,235,24.99,9,1.4,18,WH004,205,80,350,S203,0.98,0.00
+F1008,Children's School Backpack,Accessories,Kids Accessories,2024-07-01,255,24.99,9,1.4,18,WH004,180,80,350,S203,0.99,0.00
+F1009,Women's Stylish Handbag,Accessories,Women's Accessories,2024-01-01,210,79.99,10,3.2,28,WH004,280,90,400,S204,0.95,0.02
+F1009,Women's Stylish Handbag,Accessories,Women's Accessories,2024-01-15,195,79.99,10,3.2,28,WH004,250,90,400,S204,0.95,0.02
+F1009,Women's Stylish Handbag,Accessories,Women's Accessories,2024-02-01,205,79.99,10,3.2,28,WH004,305,90,400,S204,0.96,0.01
+F1009,Women's Stylish Handbag,Accessories,Women's Accessories,2024-02-15,218,79.99,10,3.2,28,WH004,267,90,400,S204,0.95,0.02
+F1009,Women's Stylish Handbag,Accessories,Women's Accessories,2024-03-01,230,69.99,10,3.2,28,WH004,299,90,400,S204,0.96,0.01
+F1009,Women's Stylish Handbag,Accessories,Women's Accessories,2024-03-15,245,69.99,10,3.2,28,WH004,254,90,400,S204,0.95,0.02
+F1009,Women's Stylish Handbag,Accessories,Women's Accessories,2024-04-01,260,69.99,10,3.2,28,WH004,294,90,400,S204,0.96,0.01
+F1009,Women's Stylish Handbag,Accessories,Women's Accessories,2024-04-15,275,69.99,10,3.2,28,WH004,239,90,400,S204,0.95,0.02
+F1009,Women's Stylish Handbag,Accessories,Women's Accessories,2024-05-01,290,69.99,10,3.2,28,WH004,264,90,400,S204,0.96,0.01
+F1009,Women's Stylish Handbag,Accessories,Women's Accessories,2024-05-15,305,59.99,10,3.2,28,WH004,204,90,400,S204,0.95,0.02
+F1009,Women's Stylish Handbag,Accessories,Women's Accessories,2024-06-01,320,59.99,10,3.2,28,WH004,234,90,400,S204,0.96,0.01
+F1009,Women's Stylish Handbag,Accessories,Women's Accessories,2024-06-15,335,59.99,10,3.2,28,WH004,159,90,400,S204,0.95,0.02
+F1009,Women's Stylish Handbag,Accessories,Women's Accessories,2024-07-01,350,59.99,10,3.2,28,WH004,174,90,400,S204,0.96,0.01
+F1010,Men's Athletic Sneakers,Footwear,Men's Footwear,2024-01-01,230,89.99,11,3.5,30,WH004,300,100,450,S205,0.94,0.02
+F1010,Men's Athletic Sneakers,Footwear,Men's Footwear,2024-01-15,215,89.99,11,3.5,30,WH004,270,100,450,S205,0.94,0.02
+F1010,Men's Athletic Sneakers,Footwear,Men's Footwear,2024-02-01,225,89.99,11,3.5,30,WH004,335,100,450,S205,0.95,0.01
+F1010,Men's Athletic Sneakers,Footwear,Men's Footwear,2024-02-15,235,89.99,11,3.5,30,WH004,295,100,450,S205,0.94,0.02
+F1010,Men's Athletic Sneakers,Footwear,Men's Footwear,2024-03-01,250,79.99,11,3.5,30,WH004,340,100,450,S205,0.95,0.01
+F1010,Men's Athletic Sneakers,Footwear,Men's Footwear,2024-03-15,265,79.99,11,3.5,30,WH004,290,100,450,S205,0.94,0.02
+F1010,Men's Athletic Sneakers,Footwear,Men's Footwear,2024-04-01,285,79.99,11,3.5,30,WH004,325,100,450,S205,0.95,0.01
+F1010,Men's Athletic Sneakers,Footwear,Men's Footwear,2024-04-15,305,79.99,11,3.5,30,WH004,260,100,450,S205,0.94,0.02
+F1010,Men's Athletic Sneakers,Footwear,Men's Footwear,2024-05-01,325,79.99,11,3.5,30,WH004,305,100,450,S205,0.95,0.01
+F1010,Men's Athletic Sneakers,Footwear,Men's Footwear,2024-05-15,345,69.99,11,3.5,30,WH004,230,100,450,S205,0.94,0.02
+F1010,Men's Athletic Sneakers,Footwear,Men's Footwear,2024-06-01,365,69.99,11,3.5,30,WH004,265,100,450,S205,0.95,0.01
+F1010,Men's Athletic Sneakers,Footwear,Men's Footwear,2024-06-15,385,69.99,11,3.5,30,WH004,180,100,450,S205,0.94,0.02
+F1010,Men's Athletic Sneakers,Footwear,Men's Footwear,2024-07-01,405,69.99,11,3.5,30,WH004,175,100,450,S205,0.95,0.01

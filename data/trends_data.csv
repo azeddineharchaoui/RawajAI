@@ -1,0 +1,118 @@
+date,category,product_type,search_trend,online_interest,promotion_impact
+2024-01-01,Electronics,Smartphones,85,78,Medium
+2024-01-15,Electronics,Smartphones,82,75,Low
+2024-02-01,Electronics,Smartphones,80,72,Low
+2024-02-15,Electronics,Smartphones,83,75,Medium
+2024-03-01,Electronics,Smartphones,85,78,Medium
+2024-03-15,Electronics,Smartphones,87,80,Medium
+2024-04-01,Electronics,Smartphones,92,85,High
+2024-04-15,Electronics,Smartphones,94,87,High
+2024-05-01,Electronics,Smartphones,95,88,High
+2024-05-15,Electronics,Smartphones,97,90,High
+2024-06-01,Electronics,Smartphones,98,92,High
+2024-06-15,Electronics,Smartphones,95,90,Medium
+2024-07-01,Electronics,Smartphones,93,88,Medium
+2024-01-01,Electronics,Laptops,75,70,Medium
+2024-01-15,Electronics,Laptops,72,68,Low
+2024-02-01,Electronics,Laptops,74,70,Medium
+2024-02-15,Electronics,Laptops,76,72,Medium
+2024-03-01,Electronics,Laptops,78,75,Medium
+2024-03-15,Electronics,Laptops,82,78,Medium
+2024-04-01,Electronics,Laptops,88,85,High
+2024-04-15,Electronics,Laptops,90,87,High
+2024-05-01,Electronics,Laptops,92,89,High
+2024-05-15,Electronics,Laptops,93,90,High
+2024-06-01,Electronics,Laptops,95,92,High
+2024-06-15,Electronics,Laptops,92,88,Medium
+2024-07-01,Electronics,Laptops,88,85,Medium
+2024-01-01,Electronics,Audio,80,75,Low
+2024-01-15,Electronics,Audio,78,72,Low
+2024-02-01,Electronics,Audio,82,76,Medium
+2024-02-15,Electronics,Audio,85,80,Medium
+2024-03-01,Electronics,Audio,88,84,Medium
+2024-03-15,Electronics,Audio,90,86,Medium
+2024-04-01,Electronics,Audio,92,88,High
+2024-04-15,Electronics,Audio,94,90,High
+2024-05-01,Electronics,Audio,95,91,High
+2024-05-15,Electronics,Audio,93,90,Medium
+2024-06-01,Electronics,Audio,90,87,Medium
+2024-06-15,Electronics,Audio,88,85,Medium
+2024-07-01,Electronics,Audio,86,82,Low
+2024-01-01,Apparel,Men's Clothing,65,60,Medium
+2024-01-15,Apparel,Men's Clothing,62,58,Low
+2024-02-01,Apparel,Men's Clothing,65,62,Medium
+2024-02-15,Apparel,Men's Clothing,68,65,Medium
+2024-03-01,Apparel,Men's Clothing,72,70,Medium
+2024-03-15,Apparel,Men's Clothing,78,75,High
+2024-04-01,Apparel,Men's Clothing,82,78,High
+2024-04-15,Apparel,Men's Clothing,85,82,High
+2024-05-01,Apparel,Men's Clothing,88,85,High
+2024-05-15,Apparel,Men's Clothing,90,87,High
+2024-06-01,Apparel,Men's Clothing,92,89,High
+2024-06-15,Apparel,Men's Clothing,94,91,High
+2024-07-01,Apparel,Men's Clothing,95,92,High
+2024-01-01,Apparel,Women's Clothing,75,72,Medium
+2024-01-15,Apparel,Women's Clothing,73,70,Medium
+2024-02-01,Apparel,Women's Clothing,76,73,Medium
+2024-02-15,Apparel,Women's Clothing,80,78,High
+2024-03-01,Apparel,Women's Clothing,85,82,High
+2024-03-15,Apparel,Women's Clothing,88,85,High
+2024-04-01,Apparel,Women's Clothing,92,89,High
+2024-04-15,Apparel,Women's Clothing,95,92,High
+2024-05-01,Apparel,Women's Clothing,97,94,High
+2024-05-15,Apparel,Women's Clothing,98,95,High
+2024-06-01,Apparel,Women's Clothing,96,93,High
+2024-06-15,Apparel,Women's Clothing,94,91,High
+2024-07-01,Apparel,Women's Clothing,92,89,High
+2024-01-01,Apparel,Children's Clothing,68,65,Medium
+2024-01-15,Apparel,Children's Clothing,65,62,Low
+2024-02-01,Apparel,Children's Clothing,63,60,Low
+2024-02-15,Apparel,Children's Clothing,65,62,Medium
+2024-03-01,Apparel,Children's Clothing,68,65,Medium
+2024-03-15,Apparel,Children's Clothing,72,69,Medium
+2024-04-01,Apparel,Children's Clothing,75,72,Medium
+2024-04-15,Apparel,Children's Clothing,80,78,High
+2024-05-01,Apparel,Children's Clothing,82,79,High
+2024-05-15,Apparel,Children's Clothing,78,75,Medium
+2024-06-01,Apparel,Children's Clothing,75,72,Medium
+2024-06-15,Apparel,Children's Clothing,72,69,Medium
+2024-07-01,Apparel,Children's Clothing,70,67,Medium
+2024-01-01,Apparel,Outerwear,95,92,High
+2024-01-15,Apparel,Outerwear,92,90,High
+2024-02-01,Apparel,Outerwear,88,85,Medium
+2024-02-15,Apparel,Outerwear,82,79,Medium
+2024-03-01,Apparel,Outerwear,75,72,Medium
+2024-03-15,Apparel,Outerwear,68,65,Low
+2024-04-01,Apparel,Outerwear,60,57,Low
+2024-04-15,Apparel,Outerwear,55,52,Low
+2024-05-01,Apparel,Outerwear,50,47,Low
+2024-05-15,Apparel,Outerwear,45,42,Low
+2024-06-01,Apparel,Outerwear,42,39,Low
+2024-06-15,Apparel,Outerwear,40,37,Low
+2024-07-01,Apparel,Outerwear,38,35,Low
+2024-01-01,Accessories,Women's Accessories,78,75,Medium
+2024-01-15,Accessories,Women's Accessories,75,72,Medium
+2024-02-01,Accessories,Women's Accessories,80,77,High
+2024-02-15,Accessories,Women's Accessories,85,82,High
+2024-03-01,Accessories,Women's Accessories,82,79,High
+2024-03-15,Accessories,Women's Accessories,84,81,High
+2024-04-01,Accessories,Women's Accessories,86,83,High
+2024-04-15,Accessories,Women's Accessories,88,85,High
+2024-05-01,Accessories,Women's Accessories,90,87,High
+2024-05-15,Accessories,Women's Accessories,92,89,High
+2024-06-01,Accessories,Women's Accessories,94,91,High
+2024-06-15,Accessories,Women's Accessories,95,92,High
+2024-07-01,Accessories,Women's Accessories,97,94,High
+2024-01-01,Footwear,Men's Footwear,70,67,Medium
+2024-01-15,Footwear,Men's Footwear,68,65,Medium
+2024-02-01,Footwear,Men's Footwear,72,69,Medium
+2024-02-15,Footwear,Men's Footwear,75,72,Medium
+2024-03-01,Footwear,Men's Footwear,78,75,Medium
+2024-03-15,Footwear,Men's Footwear,82,79,High
+2024-04-01,Footwear,Men's Footwear,85,82,High
+2024-04-15,Footwear,Men's Footwear,88,85,High
+2024-05-01,Footwear,Men's Footwear,92,89,High
+2024-05-15,Footwear,Men's Footwear,94,91,High
+2024-06-01,Footwear,Men's Footwear,96,93,High
+2024-06-15,Footwear,Men's Footwear,98,95,High
+2024-07-01,Footwear,Men's Footwear,99,96,High
