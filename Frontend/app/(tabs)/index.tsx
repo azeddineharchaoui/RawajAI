@@ -1,0 +1,382 @@
+import { Image } from 'expo-image';
+import { ActivityIndicator, StyleSheet, View, ScrollView, TouchableOpacity } from 'react-native';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'expo-router';
+
+import ParallaxScrollView from '@/components/ParallaxScrollView';
+import { ThemedText } from '@/components/ThemedText';
+import { ThemedView } from '@/components/ThemedView';
+import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { api } from '@/services/api';
+import { Colors } from '@/constants/Colors';
+import { useColorScheme } from '@/hooks/useColorScheme';
+
+export default function DashboardScreen() {
+  const router = useRouter();
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme ?? 'light'];
+  const [loading, setLoading] = useState(true);
+  const [tunnelStatus, setTunnelStatus] = useState<{status: string, url?: string} | null>(null);
+  const [dashboardData, setDashboardData] = useState({
+    pendingAlerts: 3,
+    totalProducts: 15,
+    lowStockItems: 4,
+    upcomingDeliveries: 2,
+    anomalyCount: 2
+  });
+
+  useEffect(() => {
+    const fetchTunnelStatus = async () => {
+      try {
+        const status = await api.getTunnelStatus();
+        setTunnelStatus(status);
+      } catch (error) {
+        console.error('Error fetching tunnel status:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTunnelStatus();
+  }, []);
+
+  const startTunnel = async () => {
+    setLoading(true);
+    try {
+      const result = await api.startTunnel();
+      setTunnelStatus(result);
+    } catch (error) {
+      console.error('Error starting tunnel:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <ParallaxScrollView
+      headerBackgroundColor={{ light: '#0a7ea4', dark: '#0a4f66' }}
+      headerTitle="Supply Chain AI Dashboard"
+      headerImage={
+        <Image
+          source={require('@/assets/images/partial-react-logo.png')}
+          style={styles.logo}
+        />
+      }>
+      
+      {/* API Connection Status */}
+      <Card style={styles.connectionCard}>
+        <ThemedText type="subtitle">API Connection Status</ThemedText>
+        {loading ? (
+          <ActivityIndicator size="small" color={colors.tint} style={styles.loader} />
+        ) : tunnelStatus?.status === 'running' ? (
+          <>
+            <View style={styles.statusContainer}>
+              <View style={[styles.statusIndicator, styles.statusActive]} />
+              <ThemedText>Connected to API</ThemedText>
+            </View>
+            <ThemedText style={styles.urlText} numberOfLines={1}>
+              {tunnelStatus.url}
+            </ThemedText>
+          </>
+        ) : (
+          <>
+            <View style={styles.statusContainer}>
+              <View style={[styles.statusIndicator, styles.statusInactive]} />
+              <ThemedText>Not Connected</ThemedText>
+            </View>
+            <Button 
+              text="Connect to API"
+              onPress={startTunnel}
+              loading={loading}
+              style={styles.connectButton}
+            />
+          </>
+        )}
+      </Card>
+
+      {/* Overview Cards */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cardsScroll}>
+        <StatCard 
+          title="Products"
+          value={dashboardData.totalProducts.toString()}
+          icon="shippingbox.fill"
+          onPress={() => router.push('/(tabs)/inventory')}
+        />
+        <StatCard 
+          title="Low Stock"
+          value={dashboardData.lowStockItems.toString()}
+          icon="exclamationmark.triangle.fill"
+          color="#E53E3E"
+          onPress={() => router.push('/(tabs)/inventory')}
+        />
+        <StatCard 
+          title="Anomalies"
+          value={dashboardData.anomalyCount.toString()}
+          icon="waveform.path.ecg"
+          color="#DD6B20"
+          onPress={() => router.push('/(tabs)/analytics')}
+        />
+        <StatCard 
+          title="Alerts"
+          value={dashboardData.pendingAlerts.toString()}
+          icon="bell.fill"
+          color="#3182CE"
+          onPress={() => router.push('/(tabs)')}
+        />
+      </ScrollView>
+
+      {/* Quick Actions */}
+      <ThemedView style={styles.sectionContainer}>
+        <ThemedText type="subtitle">Quick Actions</ThemedText>
+        <View style={styles.actionGrid}>
+          <ActionButton 
+            title="Demand Forecast"
+            icon="chart.line.uptrend.xyaxis.circle.fill"
+            onPress={() => router.push('/(tabs)/forecast')}
+          />
+          <ActionButton 
+            title="Inventory Optimization"
+            icon="cube.box.fill"
+            onPress={() => router.push('/(tabs)/inventory')}
+          />
+          <ActionButton 
+            title="Ask Assistant"
+            icon="text.bubble.fill"
+            onPress={() => router.push('/(tabs)/assistant')}
+          />
+          <ActionButton 
+            title="Generate Report"
+            icon="doc.text.fill"
+            onPress={() => router.push('/(tabs)/analytics')}
+          />
+        </View>
+      </ThemedView>
+
+      {/* Recent Activity */}
+      <ThemedView style={styles.sectionContainer}>
+        <ThemedText type="subtitle">Recent Activity</ThemedText>
+        <ActivityItem 
+          title="Anomaly Detected" 
+          description="Unusual demand pattern for product ID: SM-5432"
+          time="2h ago"
+        />
+        <ActivityItem 
+          title="Forecast Updated" 
+          description="Quarterly demand forecast has been updated"
+          time="5h ago"
+        />
+        <ActivityItem 
+          title="Inventory Optimized" 
+          description="Stock levels have been optimized for 12 products"
+          time="1d ago"
+        />
+      </ThemedView>
+    </ParallaxScrollView>
+  );
+}
+
+// Stat Card Component
+const StatCard = ({ title, value, icon, color = '#38A169', onPress }: { 
+  title: string;
+  value: string;
+  icon: string;
+  color?: string;
+  onPress: () => void;
+}) => {
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme ?? 'light'];
+  
+  return (
+    <TouchableOpacity onPress={onPress}>
+      <Card style={styles.statCard}>
+        <View style={[styles.iconContainer, { backgroundColor: color + '20' }]}>
+          <View style={styles.icon}>
+            {/* Using a colored View since we can't easily colorize IconSymbol */}
+            <View style={[styles.iconInner, { backgroundColor: color }]} />
+          </View>
+        </View>
+        <ThemedText type="defaultSemiBold" style={styles.statValue}>{value}</ThemedText>
+        <ThemedText style={styles.statTitle}>{title}</ThemedText>
+      </Card>
+    </TouchableOpacity>
+  );
+};
+
+// Action Button Component
+const ActionButton = ({ title, icon, onPress }: {
+  title: string;
+  icon: string;
+  onPress: () => void;
+}) => {
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme ?? 'light'];
+  
+  return (
+    <TouchableOpacity onPress={onPress} style={styles.actionButton}>
+      <View style={[styles.actionIcon, { backgroundColor: colors.tint + '20' }]}>
+        <View style={[styles.iconInner, { backgroundColor: colors.tint }]} />
+      </View>
+      <ThemedText style={styles.actionTitle} numberOfLines={2}>{title}</ThemedText>
+    </TouchableOpacity>
+  );
+};
+
+// Activity Item Component
+const ActivityItem = ({ title, description, time }: {
+  title: string;
+  description: string;
+  time: string;
+}) => {
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme ?? 'light'];
+  
+  return (
+    <ThemedView style={styles.activityItem}>
+      <View style={styles.activityDot} />
+      <View style={styles.activityContent}>
+        <ThemedText type="defaultSemiBold">{title}</ThemedText>
+        <ThemedText style={styles.activityDesc}>{description}</ThemedText>
+        <ThemedText style={styles.activityTime}>{time}</ThemedText>
+      </View>
+    </ThemedView>
+  );
+};
+
+
+const styles = StyleSheet.create({
+  logo: {
+    height: 100,
+    width: 100,
+    bottom: -30,
+    right: 20,
+    position: 'absolute',
+    opacity: 0.8,
+  },
+  connectionCard: {
+    marginBottom: 16,
+    padding: 16,
+  },
+  loader: {
+    marginTop: 8,
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  statusIndicator: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  statusActive: {
+    backgroundColor: '#38A169',
+  },
+  statusInactive: {
+    backgroundColor: '#E53E3E',
+  },
+  urlText: {
+    fontSize: 12,
+    opacity: 0.7,
+  },
+  connectButton: {
+    marginTop: 8,
+  },
+  cardsScroll: {
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  statCard: {
+    width: 120,
+    height: 120,
+    padding: 12,
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  icon: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  statTitle: {
+    fontSize: 12,
+    opacity: 0.7,
+    textAlign: 'center',
+  },
+  sectionContainer: {
+    marginBottom: 24,
+    gap: 16,
+  },
+  actionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -8,
+  },
+  actionButton: {
+    width: '50%',
+    padding: 8,
+    alignItems: 'center',
+  },
+  actionIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  actionTitle: {
+    textAlign: 'center',
+    fontSize: 14,
+  },
+  activityItem: {
+    flexDirection: 'row',
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(150, 150, 150, 0.2)',
+  },
+  activityDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#3182CE',
+    marginTop: 6,
+    marginRight: 12,
+  },
+  activityContent: {
+    flex: 1,
+  },
+  activityDesc: {
+    opacity: 0.7,
+    marginTop: 2,
+    fontSize: 14,
+  },
+  activityTime: {
+    fontSize: 12,
+    opacity: 0.5,
+    marginTop: 4,
+  },
+});
