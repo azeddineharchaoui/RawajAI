@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { ActivityIndicator, StyleSheet, View, ScrollView, TouchableOpacity } from 'react-native';
+import { ActivityIndicator, StyleSheet, View, ScrollView, TouchableOpacity,ImageBackground, Dimensions } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 
@@ -7,10 +7,11 @@ import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
 import { api } from '@/services/api';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import ApiConeection from '@/components/home/ApiConeection';
+const {width, height} = Dimensions.get('window');
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -58,42 +59,17 @@ export default function DashboardScreen() {
       headerBackgroundColor={{ light: '#0a7ea4', dark: '#0a4f66' }}
       headerTitle="Supply Chain AI Dashboard"
       headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
+        <ImageBackground
+          source={require('@/assets/images/cover.jpeg')}
           style={styles.logo}
+          resizeMode='cover'
         />
       }>
       
       {/* API Connection Status */}
-      <Card style={styles.connectionCard}>
-        <ThemedText type="subtitle">API Connection Status</ThemedText>
-        {loading ? (
-          <ActivityIndicator size="small" color={colors.tint} style={styles.loader} />
-        ) : tunnelStatus?.status === 'running' ? (
-          <>
-            <View style={styles.statusContainer}>
-              <View style={[styles.statusIndicator, styles.statusActive]} />
-              <ThemedText>Connected to API</ThemedText>
-            </View>
-            <ThemedText style={styles.urlText} numberOfLines={1}>
-              {tunnelStatus.url}
-            </ThemedText>
-          </>
-        ) : (
-          <>
-            <View style={styles.statusContainer}>
-              <View style={[styles.statusIndicator, styles.statusInactive]} />
-              <ThemedText>Not Connected</ThemedText>
-            </View>
-            <Button 
-              text="Connect to API"
-              onPress={startTunnel}
-              loading={loading}
-              style={styles.connectButton}
-            />
-          </>
-        )}
-      </Card>
+      <ApiConeection />
+
+      {/* Dashboard Overview */}
 
       {/* Overview Cards */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cardsScroll}>
@@ -246,12 +222,9 @@ const ActivityItem = ({ title, description, time }: {
 
 const styles = StyleSheet.create({
   logo: {
-    height: 100,
-    width: 100,
-    bottom: -30,
-    right: 20,
-    position: 'absolute',
-    opacity: 0.8,
+    flex: 1,
+    width: '100%',
+    height: "100%",
   },
   connectionCard: {
     marginBottom: 16,

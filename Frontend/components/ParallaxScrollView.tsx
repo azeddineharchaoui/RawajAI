@@ -15,6 +15,7 @@ const HEADER_HEIGHT = 250;
 
 type Props = PropsWithChildren<{
   headerImage: ReactElement;
+  headerTitle?: ReactElement | string;
   headerBackgroundColor: { dark: string; light: string };
 }>;
 

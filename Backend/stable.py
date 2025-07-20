@@ -2,6 +2,7 @@
 # Make sure to install these dependencies before running:
 !pip install transformers langchain-huggingface kaleido==0.2.1 torch torchaudio langchain_community bitsandbytes autoawq accelerate sentencepiece protobuf pulp scipy plotly==5.24.1 reportlab gtts pytrends faiss-cpu
 !pip install kaleido==0.2.1 plotly==5.24.1
+!pip install flask-cors
 
 # Import Colab configuration
 from colab_config import setup_colab_environment, optimize_model_loading
@@ -61,8 +62,12 @@ import socket
 import time
 import platform
 import re
+from flask import Flask
+from flask_cors import CORS
 
 app = Flask(__name__)
+
+CORS(app) 
 
 # Configuration
 os.environ["HF_TOKEN"] = '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'
