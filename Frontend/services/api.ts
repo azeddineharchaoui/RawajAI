@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 // Default API URL - for local dev testing
-const DEFAULT_API_URL = ' https://tend-apt-recorder-waterproof.trycloudflare.com';
+const DEFAULT_API_URL = 'https://apparel-hood-manhattan-risk.trycloudflare.com';
 const API_URL = Constants.expoConfig?.extra?.apiUrl || DEFAULT_API_URL;
 const TUNNEL_KEY = 'tunnel_url_key'; // Must be a simple string key for SecureStore - no URL characters
 
@@ -89,28 +89,48 @@ export const clearTunnelUrl = async () => {
 };
 
 // Base functions remain unchanged
-const getBaseUrl = async () => {
+const getBaseUrl = async (): Promise<string> => {
   const tunnelUrl = await getTunnelUrl();
   if (tunnelUrl) return tunnelUrl;
   
   if (Platform.OS === 'android') {
-    return API_URL.replace('localhost', '10.0.2.2');
+    return DEFAULT_API_URL.replace('localhost', '10.0.2.2');
   }
   
-  return API_URL;
+  return DEFAULT_API_URL;
 };
 
-const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 10000) => {
+/**
+ * Fetch with timeout function
+ * @param url The URL to fetch
+ * @param options Fetch options
+ * @param timeout Timeout in milliseconds (default: 60000 - 60 seconds)
+ * @returns Response from fetch
+ */
+const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 60000) => {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
   
-  const response = await fetch(url, {
-    ...options,
-    signal: controller.signal,
-  });
-  
-  clearTimeout(id);
-  return response;
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    
+    // Check if this was an abort error
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.warn(`Request to ${url} timed out after ${timeout}ms`);
+      throw new Error(`Request timed out after ${timeout/1000} seconds. The operation might still be processing on the server.`);
+    }
+    
+    // Re-throw other errors
+    throw error;
+  }
 };
 
 export class ApiClient {
@@ -350,6 +370,86 @@ export class ApiClient {
   
   async askQuestion(query: string, language = 'en') {
     return this.post('/ask', { query, language });
+  }
+  
+  /**
+   * Ask a question and get both text and audio response
+   * @param query The question to ask
+   * @param language The language to use (default: 'en')
+   * @returns A promise resolving to the response with speech URL
+   */
+  async askQuestionWithTTS(query: string, language = 'en') {
+    try {
+      // Use a much longer timeout specifically for this endpoint (180 seconds)
+      const baseUrl = await getBaseUrl();
+      const url = new URL(`${baseUrl}/ask_tts`);
+      
+      const options: RequestInit = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          query, 
+          language,
+          // Add a parameter to indicate we want to handle long responses
+          handle_long_responses: true 
+        }),
+      };
+      
+      console.log(`API POST Request to ${url.toString()}`, { query, language });
+      
+      // Use a longer timeout (3 minutes) specifically for TTS requests with long responses
+      const response = await fetchWithTimeout(url.toString(), options, 180000);
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.log(`API Error Response:`, errorData);
+        throw new Error(errorData.error || `API Error: ${response.status} ${response.statusText}`);
+      }
+      
+      // Stream-aware response parsing
+      const data = await response.json();
+      
+      // Validate the response format
+      if (!data.response) {
+        console.warn('TTS response missing text response field');
+      }
+      
+      // Check if audio was generated
+      if (!data.speech_url) {
+        console.warn('TTS response missing speech URL, falling back to text-only');
+      }
+      
+      return data;
+    } catch (error) {
+      console.log('Error with /ask_tts endpoint:', error);
+      
+      try {
+        // First try with regular ask endpoint as fallback
+        console.log('Attempting fallback to /ask endpoint...');
+        const textResponse = await this.askQuestion(query, language);
+        
+        return {
+          ...textResponse,
+          speech_url: null,
+          success: true,
+          tts_fallback: true
+        };
+      } catch (fallbackError) {
+        console.error('Both TTS and fallback endpoints failed:', fallbackError);
+        
+        // Return a minimal response when all else fails
+        return {
+          query: query,
+          response: "I'm sorry, but I'm having trouble connecting to the server. Please check your connection and try again.",
+          language: language,
+          speech_url: null,
+          success: false,
+          error: error instanceof Error ? error.message : 'Service unavailable'
+        };
+      }
+    }
   }
   
   async detectAnomalies(data: AnomalyDetectionParams) {
