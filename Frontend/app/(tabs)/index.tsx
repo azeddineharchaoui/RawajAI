@@ -11,7 +11,7 @@ import { api } from '@/services/api';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import ApiConeection from '@/components/home/ApiConeection';
-const {width, height} = Dimensions.get('window');
+import StatCard from '@/components/home/stateCard';
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -76,27 +76,27 @@ export default function DashboardScreen() {
         <StatCard 
           title="Products"
           value={dashboardData.totalProducts.toString()}
-          icon="shippingbox.fill"
+          icon={require('@/assets/images/product.png')}
           onPress={() => router.push('/(tabs)/inventory')}
         />
         <StatCard 
           title="Low Stock"
           value={dashboardData.lowStockItems.toString()}
-          icon="exclamationmark.triangle.fill"
+          icon={require('@/assets/images/lowStock.png')}
           color="#E53E3E"
           onPress={() => router.push('/(tabs)/inventory')}
         />
         <StatCard 
           title="Anomalies"
           value={dashboardData.anomalyCount.toString()}
-          icon="waveform.path.ecg"
+          icon={require('@/assets/images/anomalies.png')}
           color="#DD6B20"
           onPress={() => router.push('/(tabs)/analytics')}
         />
         <StatCard 
           title="Alerts"
           value={dashboardData.pendingAlerts.toString()}
-          icon="bell.fill"
+          icon={require('@/assets/images/Alerts.png')}
           color="#3182CE"
           onPress={() => router.push('/(tabs)')}
         />
@@ -151,33 +151,6 @@ export default function DashboardScreen() {
     </ParallaxScrollView>
   );
 }
-
-// Stat Card Component
-const StatCard = ({ title, value, icon, color = '#38A169', onPress }: { 
-  title: string;
-  value: string;
-  icon: string;
-  color?: string;
-  onPress: () => void;
-}) => {
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
-  
-  return (
-    <TouchableOpacity onPress={onPress}>
-      <Card style={styles.statCard}>
-        <View style={[styles.iconContainer, { backgroundColor: color + '20' }]}>
-          <View style={styles.icon}>
-            {/* Using a colored View since we can't easily colorize IconSymbol */}
-            <View style={[styles.iconInner, { backgroundColor: color }]} />
-          </View>
-        </View>
-        <ThemedText type="defaultSemiBold" style={styles.statValue}>{value}</ThemedText>
-        <ThemedText style={styles.statTitle}>{title}</ThemedText>
-      </Card>
-    </TouchableOpacity>
-  );
-};
 
 // Action Button Component
 const ActionButton = ({ title, icon, onPress }: {
