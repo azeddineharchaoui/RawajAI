@@ -1,22 +1,16 @@
 import { Image } from 'expo-image';
-import { ActivityIndicator, StyleSheet, View, ScrollView, TouchableOpacity, ImageBackground, Dimensions } from 'react-native';
-import { useState, useEffect } from 'react';
-import { useRouter } from 'expo-router';
+import { StyleSheet, View, TouchableOpacity } from 'react-native';
 
-import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
 import { Card } from '@/components/ui/Card';
-import { api } from '@/services/api';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import ApiConeection from '@/components/home/ApiConeection';
 
 // Stat Card Component
 const StatCard = ({ title, value, icon, color = '#38A169', onPress }: {
     title: string;
     value: string;
-    icon: number;
+    icon: number|string;
     color?: string;
     onPress: () => void;
 }) => {
