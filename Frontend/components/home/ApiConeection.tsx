@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/Button';
 import { api } from '@/services/api';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { Link, Link2Off, LucideLink2Off } from 'lucide-react-native';
+import { red } from 'react-native-reanimated/lib/typescript/Colors';
 
 const ApiConeection = () => {
     const [loading, setLoading] = useState(true);
@@ -26,37 +28,19 @@ const ApiConeection = () => {
             setLoading(false);
         }
     };
-    useEffect(()=>{startTunnel()},[])
+    useEffect(() => { startTunnel() }, [])
     return (
-        <Card style={styles.connectionCard}>
-            <ThemedText type="subtitle">API Connection Status</ThemedText>
-            {loading ? (
-                <ActivityIndicator size="small" color={colors.tint} style={styles.loader} />
-            ) : tunnelStatus?.status === 'already_running' ? (
-                <>
-                    <View style={styles.statusContainer}>
-                        <View style={[styles.statusIndicator, styles.statusActive]} />
-                        <ThemedText>Connected to API</ThemedText>
-                    </View>
-                    <ThemedText style={styles.urlText} numberOfLines={1}>
-                        {tunnelStatus.url}
-                    </ThemedText>
-                </>
-            ) : (
-                <>
-                    <View style={styles.statusContainer}>
-                        <View style={[styles.statusIndicator, styles.statusInactive]} />
-                        <ThemedText>Not Connected</ThemedText>
-                    </View>
-                    <Button
-                        text="Connect to API"
-                        onPress={startTunnel}
-                        loading={loading}
-                        style={styles.connectButton}
-                    />
-                </>
-            )}
-        </Card>
+        <>
+            <View style={styles.circles}>
+                {loading ? (
+                    <ActivityIndicator size="small" color={colors.tint} style={styles.loader} />
+                ) : tunnelStatus?.status === 'already_running' ? (
+                    <Link color={"green"} />
+                ) : (
+                    <LucideLink2Off color={"red"} onPress={startTunnel} />
+                )}
+            </View>
+        </>
     )
 }
 
@@ -192,6 +176,14 @@ const styles = StyleSheet.create({
         opacity: 0.5,
         marginTop: 4,
     },
+    circles: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: 70,
+        height: 70,
+        borderRadius: "90px",
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    }
 });
 
 
