@@ -4,7 +4,8 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 // Import the same DEFAULT_API_URL from api.ts to ensure consistency
-const DEFAULT_API_URL = 'https://apparel-hood-manhattan-risk.trycloudflare.com';
+// Import the same DEFAULT_API_URL from api.ts to ensure consistency
+const DEFAULT_API_URL = 'https://tend-apt-recorder-waterproof.trycloudflare.com';
 const API_URL = Constants.expoConfig?.extra?.apiUrl || DEFAULT_API_URL;
 
 // Base URL helper function that uses the same logic as api.ts
@@ -85,28 +86,50 @@ class AudioPlayerService {
       let retryCount = 0;
       let sound = null;
       
-      while (retryCount < 5) { // Increased retry attempts
+      while (retryCount < 5) { // Up to 5 retry attempts
         try {
-          // Use a more robust loading configuration
+          // Handle potential CORS or network issues
+          const audioType = fullUrl.endsWith('.mp3') ? 'mp3' : 'mpeg';
+          
+          console.log(`Attempt ${retryCount + 1} to load audio...`);
+          
+          // Add timestamp to URL to avoid caching issues
+          const timestampedUrl = `${fullUrl}${fullUrl.includes('?') ? '&' : '?'}_t=${Date.now()}`;
+          
+          // Use a more robust loading configuration with explicit request headers
           const soundData = await Audio.Sound.createAsync(
-            { uri: fullUrl },
+            { 
+              uri: timestampedUrl,
+              headers: {
+                'Accept': `audio/${audioType}, audio/*;q=0.8`,
+                'Cache-Control': 'no-cache',
+                'X-Requested-With': 'XMLHttpRequest'
+              }
+            },
             { 
               shouldPlay: true, 
               volume: 1.0, 
               progressUpdateIntervalMillis: 200,
-              positionMillis: 0
-              // Use streaming mode for progressive loading
+              positionMillis: 0,
+              rate: 1.0,
+              isMuted: false
             },
             (status) => {
               this.onPlaybackStatusUpdate(status);
               
-              // Monitor buffering state to detect and handle issues
+              // Enhanced monitoring for network and buffering issues
               if (status.isLoaded) {
                 if (status.isBuffering) {
                   console.log(`Audio buffering: ${status.positionMillis}/${status.durationMillis} ms`);
+                  
+                  // If buffering takes too long, we might want to log it
+                  // This could be used to trigger a retry in the future
+                } else if (status.isPlaying && status.positionMillis > 0) {
+                  // Successfully playing past the beginning
+                  console.log(`Audio playing: ${status.positionMillis}/${status.durationMillis} ms`);
                 }
                 
-                // Handle playback progress
+                // Track playback progress
                 if (status.positionMillis && status.durationMillis) {
                   const progress = status.positionMillis / status.durationMillis;
                   if (progress > 0.95) {

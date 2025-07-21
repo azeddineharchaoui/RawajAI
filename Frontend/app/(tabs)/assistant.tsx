@@ -20,6 +20,10 @@ type Message = {
   isUser: boolean;
   timestamp: Date;
   speechUrl?: string | null;
+  isAudioLoading?: boolean;
+  isAudioPlaying?: boolean;
+  hasPlayedAudio?: boolean;
+  audioPlaybackFailed?: boolean;
 };
 
 export default function AssistantScreen() {
@@ -81,17 +85,43 @@ export default function AssistantScreen() {
           console.log(`Playing audio from URL: ${response.speech_url}`);
           setIsSpeaking(true);
           
-          // Register a one-time playback completion listener
+          // Provide visual feedback that audio is being prepared
+          // We'll update the message temporarily to show loading status
+          setMessages(prev => prev.map(msg => 
+            msg.id === botMessage.id 
+              ? { ...msg, isAudioLoading: true }
+              : msg
+          ));
+          
+          // Register a one-time playback completion listener with improved monitoring
           const unsubscribe = audioPlayer.addPlaybackListener((isPlaying, url) => {
-            if (!isPlaying && url === response.speech_url) {
-              console.log('Audio playback completed or stopped');
-              setIsSpeaking(false);
-              setCurrentPlayingUrl(null);
-              unsubscribe(); // Remove the listener when done
+            if (url === response.speech_url) {
+              // Update status based on playback state
+              if (!isPlaying) {
+                console.log('Audio playback completed or stopped');
+                setIsSpeaking(false);
+                setCurrentPlayingUrl(null);
+                
+                // Update message status
+                setMessages(prev => prev.map(msg => 
+                  msg.id === botMessage.id 
+                    ? { ...msg, isAudioLoading: false, hasPlayedAudio: true }
+                    : msg
+                ));
+                
+                unsubscribe(); // Remove the listener when done
+              } else {
+                // Audio is actively playing
+                setMessages(prev => prev.map(msg => 
+                  msg.id === botMessage.id 
+                    ? { ...msg, isAudioLoading: false, isAudioPlaying: true }
+                    : msg
+                ));
+              }
             }
           });
           
-          // Start playback with multiple retry attempts
+          // Start playback with enhanced error handling
           await audioPlayer.playFromUrl(response.speech_url);
           
           // Add haptic feedback when audio starts playing
@@ -101,8 +131,14 @@ export default function AssistantScreen() {
           setIsSpeaking(false);
           setCurrentPlayingUrl(null);
           
+          // Update message to show audio failed
+          setMessages(prev => prev.map(msg => 
+            msg.id === botMessage.id 
+              ? { ...msg, isAudioLoading: false, audioPlaybackFailed: true }
+              : msg
+          ));
+          
           // Show a toast or some UI indication that audio failed
-          // (In a real app, you might want to add a Toast component for this)
           console.log('Audio playback failed - displaying text response only');
         }
       }

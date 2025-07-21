@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 // Default API URL - for local dev testing
-const DEFAULT_API_URL = 'https://apparel-hood-manhattan-risk.trycloudflare.com';
+const DEFAULT_API_URL = 'https://azerbaijan-reader-parallel-toxic.trycloudflare.com';
 const API_URL = Constants.expoConfig?.extra?.apiUrl || DEFAULT_API_URL;
 const TUNNEL_KEY = 'tunnel_url_key'; // Must be a simple string key for SecureStore - no URL characters
 
@@ -411,13 +411,40 @@ export class ApiClient {
       // Stream-aware response parsing
       const data = await response.json();
       
-      // Validate the response format
+      // Validate and enhance the response
       if (!data.response) {
         console.warn('TTS response missing text response field');
       }
       
-      // Check if audio was generated
-      if (!data.speech_url) {
+      // Verify the speech URL is properly formed and accessible
+      if (data.speech_url) {
+        // Ensure the speech_url is an absolute URL
+        const speechUrl = data.speech_url.startsWith('http') 
+          ? data.speech_url 
+          : `${baseUrl}${data.speech_url}`;
+        
+        // Add the validated URL back to the data object
+        data.speech_url = speechUrl;
+        
+        // Pre-validate the audio URL with a HEAD request to detect issues early
+        try {
+          const audioCheckResponse = await fetch(speechUrl, { 
+            method: 'HEAD',
+            headers: { 'Cache-Control': 'no-cache' }
+          });
+          
+          if (!audioCheckResponse.ok) {
+            console.warn(`Audio file check failed with status: ${audioCheckResponse.status}`);
+            data.speech_url_validated = false;
+          } else {
+            data.speech_url_validated = true;
+            console.log('Audio URL validated successfully');
+          }
+        } catch (audioCheckError) {
+          console.warn('Audio URL validation failed:', audioCheckError);
+          data.speech_url_validated = false;
+        }
+      } else {
         console.warn('TTS response missing speech URL, falling back to text-only');
       }
       

@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 // Default API URL - for local dev testing
-const DEFAULT_API_URL = 'https://apparel-hood-manhattan-risk.trycloudflare.com';
+const DEFAULT_API_URL = 'https://azerbaijan-reader-parallel-toxic.trycloudflare.com';
 const API_URL = Constants.expoConfig?.extra?.apiUrl || DEFAULT_API_URL;
 const TUNNEL_KEY = 'tunnel_url'; // Must be a simple string key for SecureStore
 
@@ -107,7 +107,7 @@ const getBaseUrl = async () => {
 };
 
 /**
- * API request function with improved timeout and retry functionality
+ * API request function with improved timeout, retry functionality, and error handling
  */
 const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 10000) => {
   const controller = new AbortController();
@@ -131,6 +131,16 @@ const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout 
     if (error instanceof Error && error.name === 'AbortError') {
       console.warn(`Request to ${url} timed out after ${timeout}ms`);
       throw new Error(`Request timed out after ${timeout}ms. The server might be overloaded.`);
+    }
+    
+    // Enhanced error detection for specific connection issues
+    if (error instanceof TypeError && error.message.includes('Network request failed')) {
+      if (url.includes('trycloudflare.com')) {
+        console.warn('Cloudflare tunnel connection failed - the tunnel may have expired');
+        // Clear the stored tunnel URL to force fallback to default URL on next request
+        await clearTunnelUrl();
+        throw new Error('Connection to Cloudflare tunnel failed. The tunnel may have expired or been closed. Please restart the tunnel from the settings screen.');
+      }
     }
     
     // Re-throw other errors

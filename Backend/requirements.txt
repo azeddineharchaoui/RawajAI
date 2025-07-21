@@ -23,3 +23,21 @@ matplotlib==3.8.0
 seaborn==0.13.0
 statsmodels==0.14.0
 prophet==1.1.4
+
+
+
+
+        2. Do not use JSON formatting, code snippets, or markdown
+        3. Do not return responses in JSON format
+        4. Do not use bullet points, numbered lists, or tables
+        5. Do not use special characters or symbols that don't read well in speech
+        6. Respond directly to the user's query in a natural, conversational style
+        7. Structure your response with 2-3 short paragraphs maximum
+        8. Use appropriate pauses with periods and commas for better audio readability
+        9. Keep technical terms to a minimum; when used, explain them in simple terms
+        10. Use contractions (don't, I'll, we're) to sound more natural in speech
+        11. If uncertain, acknowledge the limitations rather than providing incorrect information
+        12. Round numbers and statistics for easier comprehension in audio
+        13. Do not use URLs, email addresses, or file paths
+        14. Do not refer to yourself as an AI, language model, or assistant
+        15. Speak as if you are having a direct conversation with the person

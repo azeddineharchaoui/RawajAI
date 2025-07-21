@@ -1,6 +1,6 @@
 # app.py
 # Make sure to install these dependencies before running:
-!pip install transformers langchain-huggingface kaleido==0.2.1 torch torchaudio langchain_community bitsandbytes autoawq accelerate sentencepiece protobuf pulp scipy plotly==5.24.1 reportlab gtts pytrends faiss-cpu
+!pip install transformers langchain-huggingface kaleido==0.2.1 torch torchaudio langchain_community bitsandbytes autoawq accelerate sentencepiece protobuf pulp scipy plotly==5.24.1 reportlab gtts pytrends faiss-cpu pydub
 !pip install kaleido==0.2.1 plotly==5.24.1
 !pip install flask-cors
 
@@ -70,7 +70,7 @@ app = Flask(__name__)
 CORS(app) 
 
 # Configuration
-os.environ["HF_TOKEN"] = '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'
+os.environ["HF_TOKEN"] = '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'
 MODEL_NAME = "mistralai/Mistral-7B-v0.1"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 WHISPER_MODEL = "openai/whisper-base"
@@ -156,17 +156,14 @@ except Exception as e:
 
 # Text-to-Speech function using gTTS
 def generate_speech(text, language="en"):
-    """Generate speech from text using Google Text-to-Speech"""
+    """Generate speech from text using Google Text-to-Speech with support for long texts"""
     try:
         # Validate input text
         if not text or not isinstance(text, str):
             print("Invalid text for speech generation")
             return None
             
-        # Limit text length to avoid issues with very long text
-        max_length = 4000  # gTTS has limitations on text length
-        if len(text) > max_length:
-            text = text[:max_length] + "..."
+        print(f"Generating speech for {len(text)} characters of text")
         
         # Map language code for gTTS
         lang_map = {
@@ -180,22 +177,182 @@ def generate_speech(text, language="en"):
         if not os.path.exists(AUDIO_PATH):
             os.makedirs(AUDIO_PATH, exist_ok=True)
         
-        # Generate speech
-        tts = gTTS(text=text, lang=lang, slow=False)
+        # Clean up old audio files (older than 24 hours) to prevent disk fill-up
+        try:
+            cleanup_time = time.time() - (24 * 60 * 60)  # 24 hours ago
+            for old_file in os.listdir(AUDIO_PATH):
+                file_path = os.path.join(AUDIO_PATH, old_file)
+                if os.path.isfile(file_path) and os.path.getmtime(file_path) < cleanup_time:
+                    try:
+                        os.remove(file_path)
+                        print(f"Cleaned up old audio file: {old_file}")
+                    except:
+                        pass
+        except Exception as cleanup_error:
+            print(f"Error during audio cleanup: {cleanup_error}")
         
-        # Save to file with proper error handling
+        # Generate a unique timestamp for this audio file
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         filename = f"{AUDIO_PATH}/response_{timestamp}.mp3"
         
-        # Try saving the file
-        try:
-            tts.save(filename)
-        except Exception as save_error:
-            print(f"Error saving speech file: {save_error}")
-            # Try with a simpler filename if there might be path issues
-            simple_filename = f"{AUDIO_PATH}/response.mp3"
-            tts.save(simple_filename)
-            filename = simple_filename
+        # Check if text exceeds gTTS limitations
+        max_chunk_length = 5000  # Safe limit for gTTS
+        
+        if len(text) <= max_chunk_length:
+            # Standard case - text is within limits
+            try:
+                # Use slow=False for normal speed, but can be adjusted for clarity if needed
+                tts = gTTS(text=text, lang=lang, slow=False)
+                
+                # Add exponential backoff retry mechanism for network issues
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        tts.save(filename)
+                        print(f"Successfully saved speech file on attempt {attempt+1}")
+                        break
+                    except Exception as retry_error:
+                        if attempt < max_retries - 1:
+                            retry_delay = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                            print(f"Retrying TTS save after {retry_delay}s delay. Error: {retry_error}")
+                            time.sleep(retry_delay)
+                        else:
+                            raise  # Re-raise on final attempt
+                            
+            except Exception as save_error:
+                print(f"Error saving speech file after retries: {save_error}")
+                # Try with a simpler filename if there might be path issues
+                simple_filename = f"{AUDIO_PATH}/response.mp3"
+                try:
+                    tts.save(simple_filename)
+                    filename = simple_filename
+                except Exception as final_error:
+                    print(f"Final attempt to save speech failed: {final_error}")
+                    return None
+        else:
+            # Handle long text by breaking it into chunks
+            print(f"Text exceeds max length ({len(text)} chars). Splitting into chunks.")
+            
+            # Split by sentences to avoid breaking mid-sentence
+            import re
+            
+            # Split text into sentences with improved sentence boundary detection
+            # This regex handles common sentence terminators and preserves punctuation
+            sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z0-9])', text)
+            
+            # If we couldn't split properly (e.g., no capitalization after periods)
+            if len(sentences) <= 1:
+                # Fall back to simpler sentence splitting
+                sentences = re.split(r'(?<=[.!?])\s+', text)
+            
+            # If text is still not properly split, use a more aggressive approach
+            if len(sentences) <= 3 and len(text) > max_chunk_length * 2:
+                # Split on any period, question mark, or exclamation mark
+                sentences = re.split(r'(?<=[.!?])', text)
+                # Clean up any empty items
+                sentences = [s.strip() for s in sentences if s.strip()]
+            
+            chunks = []
+            current_chunk = ""
+            
+            # Group sentences into chunks under the max length, being careful
+            # not to exceed the maximum chunk size
+            for sentence in sentences:
+                # If the sentence itself exceeds the max length, split it further
+                if len(sentence) > max_chunk_length:
+                    # If we have a current chunk, add it first
+                    if current_chunk:
+                        chunks.append(current_chunk.strip())
+                        current_chunk = ""
+                    
+                    # Split long sentence by phrases (commas, semicolons, etc.)
+                    phrases = re.split(r'(?<=[,;:])\s+', sentence)
+                    phrase_chunk = ""
+                    
+                    for phrase in phrases:
+                        if len(phrase_chunk) + len(phrase) < max_chunk_length:
+                            phrase_chunk += phrase + " "
+                        else:
+                            if phrase_chunk:
+                                chunks.append(phrase_chunk.strip())
+                            phrase_chunk = phrase + " "
+                    
+                    # Add the last phrase chunk if not empty
+                    if phrase_chunk.strip():
+                        current_chunk = phrase_chunk.strip()
+                    
+                # Normal case - add sentence to current chunk if it fits
+                elif len(current_chunk) + len(sentence) < max_chunk_length:
+                    current_chunk += sentence + " "
+                else:
+                    # Current chunk is full, store it and start a new one
+                    if current_chunk:
+                        chunks.append(current_chunk.strip())
+                    current_chunk = sentence + " "
+            
+            # Add the last chunk if not empty
+            if current_chunk.strip():
+                chunks.append(current_chunk.strip())
+                
+            # Ensure we have at least one chunk
+            if not chunks and text:
+                # Emergency fallback - split by a fixed size
+                chunks = [text[i:i+max_chunk_length] for i in range(0, len(text), max_chunk_length)]
+            
+            print(f"Split text into {len(chunks)} chunks for TTS processing")
+            
+            # Process each chunk and combine the audio files
+            chunk_files = []
+            
+            for i, chunk in enumerate(chunks):
+                chunk_filename = f"{AUDIO_PATH}/chunk_{timestamp}_{i}.mp3"
+                try:
+                    chunk_tts = gTTS(text=chunk, lang=lang, slow=False)
+                    chunk_tts.save(chunk_filename)
+                    chunk_files.append(chunk_filename)
+                    print(f"Generated chunk {i+1}/{len(chunks)}")
+                except Exception as chunk_error:
+                    print(f"Error processing chunk {i}: {chunk_error}")
+            
+            # Combine audio files if we have at least one successful chunk
+            if chunk_files:
+                try:
+                    from pydub import AudioSegment
+                    
+                    combined = AudioSegment.empty()
+                    for chunk_file in chunk_files:
+                        segment = AudioSegment.from_mp3(chunk_file)
+                        combined += segment
+                    
+                    # Save the combined file
+                    combined.export(filename, format="mp3")
+                    
+                    # Clean up chunk files
+                    for chunk_file in chunk_files:
+                        try:
+                            os.remove(chunk_file)
+                        except:
+                            pass
+                            
+                except ImportError:
+                    print("pydub not available, using first chunk as response")
+                    if chunk_files:
+                        filename = chunk_files[0]
+                except Exception as combine_error:
+                    print(f"Error combining audio chunks: {combine_error}")
+                    # Fall back to first chunk if combining fails
+                    if chunk_files:
+                        filename = chunk_files[0]
+            else:
+                # If all chunks failed, try with a shortened version of the text
+                try:
+                    print("All chunks failed, falling back to shortened text")
+                    shortened_text = text[:max_chunk_length] + "..."
+                    tts = gTTS(text=shortened_text, lang=lang, slow=False)
+                    tts.save(filename)
+                except Exception as fallback_error:
+                    print(f"Fallback TTS also failed: {fallback_error}")
+                    return None
         
         # Verify the file was created
         if os.path.exists(filename):
@@ -1526,89 +1683,252 @@ class ReportGenerator:
 report_generator = ReportGenerator()
 
 # Multilingual response generation
+def post_process_response(text, language="en"):
+    """
+    Post-process the LLM response to make it more suitable for conversation and TTS
+    
+    This function cleans up the response to ensure it's well-formatted for speech synthesis
+    and doesn't contain elements that would sound awkward when spoken.
+    """
+    import re
+    
+    # Skip if the text is empty or too short
+    if not text or len(text.strip()) < 5:
+        return text
+    
+    # Remove any markdown code blocks
+    text = re.sub(r'```(?:[a-zA-Z]+)?\n[\s\S]*?\n```', ' ', text)
+    
+    # Remove JSON-like structures 
+    text = re.sub(r'\{[\s\S]*?\}', ' ', text)
+    
+    # Replace symbols that don't work well in speech
+    replacements = {
+        '```': ' ',
+        '**': ' ',
+        '*': ' ',
+        '#': ' ',
+        '|': ', ',
+        '=': ' equals ',
+        '->': ' to ',
+        '<-': ' from ',
+        '>=': ' greater than or equal to ',
+        '<=': ' less than or equal to ',
+        '>': ' greater than ',
+        '<': ' less than ',
+    }
+    
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    
+    # Fix spacing issues
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    # Ensure proper sentence breaks for TTS natural pauses
+    text = re.sub(r'([.!?])\s*([A-Z])', r'\1 \2', text)
+    
+    # Handle numbers for better speech (e.g., "100,000" -> "100 thousand")
+    def number_to_words(match):
+        num = int(match.group(0).replace(',', ''))
+        if num >= 1000000:
+            return f"{num // 1000000} million"
+        elif num >= 1000:
+            return f"{num // 1000} thousand"
+        return match.group(0)
+    
+    text = re.sub(r'\b\d{4,}(?:,\d{3})*\b', number_to_words, text)
+    
+    # Language-specific post-processing
+    if language == "fr":
+        # Fix French spacing around punctuation
+        text = re.sub(r'\s+([.,;:!?])', r'\1', text)
+        # Fix spaces before double punctuation in French
+        text = re.sub(r'([;:!?])(?!\s)', r'\1 ', text)
+    
+    # Remove any system prompt leakage phrases
+    system_leakage_phrases = [
+        "As a supply chain assistant",
+        "As an AI assistant",
+        "As your AI assistant",
+        "As a helpful assistant",
+        "I don't have access to",
+        "I don't have the ability to",
+        "I'm not able to",
+        "I cannot access",
+    ]
+    
+    for phrase in system_leakage_phrases:
+        if text.startswith(phrase):
+            text = text[len(phrase):].strip()
+            # If the text now starts with certain connecting words, clean them up
+            text = re.sub(r'^[,.]?\s*(but|however|nevertheless|yet|still|I can|I will|I could|I would)', '', text, flags=re.IGNORECASE).strip()
+    
+    # Ensure the text doesn't end with an incomplete sentence
+    if not re.search(r'[.!?]$', text):
+        text += "."
+        
+    return text
+
 def generate_response(query, context="", language="en"):
-    """Generate a response using the language model with proper error handling"""
+    """Generate a user-friendly response optimized for conversation and audio using prompt engineering"""
     try:
         # Validate inputs
         if not query:
             return "I didn't receive a question to answer."
-            
-        # Get language-specific prompt
-        lang_prompt = {
-            "en": "Provide a detailed response in English:",
-            "fr": "Fournissez une réponse détaillée en français:",
-            "ar": "قدم إجابة مفصلة باللغة العربية:"
-        }.get(language, "Provide a detailed response in English:")
         
-        # Format prompt with context
+        # Define persona and style guides for different languages
+        persona = {
+            "en": "You are a helpful and friendly supply chain assistant named RawajAI. Your responses should be conversational, clear, and easy to understand when spoken aloud. You should sound natural and human-like. Avoid technical jargon unless necessary, and explain complex concepts in simple terms. Never use special characters, code snippets, or JSON formatting in your responses.",
+            "fr": "Vous êtes un assistant de chaîne d'approvisionnement utile et amical nommé RawajAI. Vos réponses doivent être conversationnelles, claires et faciles à comprendre lorsqu'elles sont prononcées à haute voix. Vous devez sembler naturel et humain. Évitez le jargon technique sauf si nécessaire, et expliquez les concepts complexes en termes simples. N'utilisez jamais de caractères spéciaux, d'extraits de code ou de formatage JSON dans vos réponses.",
+            "ar": "أنت مساعد سلسلة التوريد مفيد وودود يسمى RawajAI. يجب أن تكون إجاباتك محادثة وواضحة وسهلة الفهم عند نطقها بصوت عالٍ. يجب أن تبدو طبيعيًا وإنسانيًا. تجنب المصطلحات الفنية إلا إذا كان ذلك ضروريًا، واشرح المفاهيم المعقدة بمصطلحات بسيطة. لا تستخدم أبدًا أحرفًا خاصة أو مقتطفات رمز أو تنسيق JSON في ردودك."
+        }
+        
+        # Audio-friendly response guidelines
+        audio_guidelines = {
+            "en": "Format your response to be easily understood when spoken aloud. Use short sentences of 10-15 words each. Include natural pauses with punctuation. Avoid complex notation, symbols, URLs, or email addresses. Spell out numbers under 10 and abbreviations on first use. Use contractions (don't, we'll) to sound more natural. If mentioning statistics or percentages, round numbers for easier comprehension.",
+            "fr": "Formatez votre réponse pour qu'elle soit facilement comprise lorsqu'elle est prononcée à haute voix. Utilisez des phrases courtes de 10 à 15 mots chacune. Incluez des pauses naturelles avec la ponctuation. Évitez les notations complexes, les symboles, les URL ou les adresses e-mail. Écrivez les nombres inférieurs à 10 en toutes lettres et les abréviations lors de la première utilisation. Utilisez des contractions pour paraître plus naturel. Si vous mentionnez des statistiques ou des pourcentages, arrondissez les nombres pour une compréhension plus facile.",
+            "ar": "قم بتنسيق ردك ليكون مفهوماً بسهولة عند نطقه بصوت عالٍ. استخدم جملاً قصيرة من 10-15 كلمة لكل منها. قم بتضمين توقفات طبيعية مع علامات الترقيم. تجنب الترميز المعقد أو الرموز أو عناوين URL أو عناوين البريد الإلكتروني. اكتب الأرقام أقل من 10 والاختصارات عند أول استخدام. استخدم الاختصارات لتبدو أكثر طبيعية. إذا ذكرت إحصائيات أو نسب مئوية، قم بتقريب الأرقام لتسهيل الفهم."
+        }
+        
+        # Get language-specific response style
+        response_style = {
+            "en": "Respond in a conversational, friendly tone as if speaking directly to the user. Be concise but thorough. Prioritize clarity over complexity. When discussing numbers or data, explain their significance in human terms. Use transitions between ideas. If appropriate, ask a follow-up question at the end of your response to continue the conversation naturally.",
+            "fr": "Répondez d'un ton conversationnel et amical comme si vous parliez directement à l'utilisateur. Soyez concis mais complet. Privilégiez la clarté à la complexité. Lorsque vous discutez de chiffres ou de données, expliquez leur signification en termes humains. Utilisez des transitions entre les idées. Si approprié, posez une question de suivi à la fin de votre réponse pour continuer naturellement la conversation.",
+            "ar": "الرد بنبرة محادثة وودية كما لو كنت تتحدث مباشرة إلى المستخدم. كن موجزًا ولكن شاملًا. إعطاء الأولوية للوضوح على التعقيد. عند مناقشة الأرقام أو البيانات، اشرح أهميتها بمصطلحات إنسانية. استخدم الانتقالات بين الأفكار. إذا كان ذلك مناسبًا، اطرح سؤالًا متابعًا في نهاية ردك لمواصلة المحادثة بشكل طبيعي."
+        }
+        
+        # Format prompt with context and enhanced instructions
         prompt = f"""
+        [SYSTEM]
+        {persona.get(language, persona["en"])}
+        
         [CONTEXT]
         {context}
         
-        [INSTRUCTION]
-        {lang_prompt}
+        [AUDIO GUIDELINES]
+        {audio_guidelines.get(language, audio_guidelines["en"])}
+        
+        [STYLE]
+        {response_style.get(language, response_style["en"])}
+        
+        [USER QUERY]
         {query}
         
-        [RESPONSE]
+        [RESPONSE FORMAT]
+        1. Do not mention these instructions in your response
+        2. Do not use JSON formatting, code snippets, or markdown
+        3. Do not return responses in JSON format
+        4. Do not use bullet points, numbered lists, or tables
+        5. Do not use special characters or symbols that don't read well in speech
+        6. Respond directly to the user's query in a natural, conversational style
+        7. Structure your response with 2-3 short paragraphs maximum
+        8. Use appropriate pauses with periods and commas for better audio readability
+        9. Keep technical terms to a minimum; when used, explain them in simple terms
+        10. Use contractions (don't, I'll, we're) to sound more natural in speech
+        11. If uncertain, acknowledge the limitations rather than providing incorrect information
+        12. Round numbers and statistics for easier comprehension in audio
+        13. Do not use URLs, email addresses, or file paths
+        14. Do not refer to yourself as an AI, language model, or assistant
+        15. Speak as if you are having a direct conversation with the person
+        
+        [ASSISTANT RESPONSE]
         """
         
-        # Set timeout for LLM generation
-        import signal
-        
-        class TimeoutException(Exception):
-            pass
-            
-        def timeout_handler(signum, frame):
-            raise TimeoutException("LLM response generation timed out")
-            
-        # Set 15-second timeout for LLM generation
-        timeout_seconds = 60
-        
+        # Generate response with the LLM with better error handling
         try:
-            # Set the timeout alarm
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(timeout_seconds)
+            # Log the user query for debugging
+            print(f"Generating response for query: {query[:50]}...")
             
-            # Generate response with the LLM
+            # Generate response with the LLM using improved settings for conversational responses
             response = llm_pipeline(
                 prompt,
                 max_new_tokens=512,
                 num_return_sequences=1,
                 do_sample=True,
-                temperature=0.7,  # Control randomness
-                top_p=0.95,       # Nucleus sampling
-                repetition_penalty=1.15  # Reduce repetition
+                temperature=0.72,      # Slightly increased for more natural responses
+                top_p=0.92,           # Nucleus sampling
+                top_k=40,             # Limit vocabulary diversity
+                repetition_penalty=1.18  # Increased to further reduce repetition
             )
-            
-            # Cancel the timeout alarm
-            signal.alarm(0)
             
             # Extract and clean the response
             if response and len(response) > 0:
                 generated_text = response[0]['generated_text']
-                # Extract text after [RESPONSE] tag
-                if "[RESPONSE]" in generated_text:
-                    result = generated_text.split("[RESPONSE]")[-1].strip()
+                
+                # Extract text after the assistant response marker
+                if "[ASSISTANT RESPONSE]" in generated_text:
+                    raw_result = generated_text.split("[ASSISTANT RESPONSE]")[-1].strip()
                 else:
                     # Fallback to extract response after the last line of the prompt
-                    result = "\n".join(generated_text.split("\n")[prompt.count("\n"):]).strip()
+                    raw_result = "\n".join(generated_text.split("\n")[prompt.count("\n"):]).strip()
+                
+                # Log the raw output for debugging
+                print(f"Raw LLM output (first 100 chars): {raw_result[:100]}...")
+                
+                # Check for common hallucination patterns or invalid outputs
+                hallucination_patterns = [
+                    r"```json",               # JSON code block
+                    r"^\s*\{\s*\"",           # JSON object start
+                    r"^\s*\[\s*\{",           # JSON array start
+                    r"as an AI language model", # Self-reference
+                    r"I don't have access to", # Limitation statement
+                    r"I cannot provide",       # Refusal pattern
+                    r"<.*?>",                 # HTML tags
+                ]
+                
+                contains_hallucination = any(re.search(pattern, raw_result) for pattern in hallucination_patterns)
+                
+                if contains_hallucination:
+                    print(f"Detected potential hallucination/invalid format, regenerating...")
+                    
+                    # Add explicit instruction to fix the issue
+                    retry_prompt = prompt + "\n\nIMPORTANT: DO NOT USE JSON FORMAT OR CODE BLOCKS IN YOUR RESPONSE. RESPOND IN PLAIN, NATURAL LANGUAGE WITHOUT SPECIAL FORMATTING.\n\n[ASSISTANT RESPONSE]"
+                    
+                    # Regenerate with stricter settings
+                    retry_response = llm_pipeline(
+                        retry_prompt,
+                        max_new_tokens=512,
+                        num_return_sequences=1,
+                        do_sample=True,
+                        temperature=0.5,      # Lower temperature for more focused response
+                        top_p=0.85,          # More constrained sampling
+                        repetition_penalty=1.2
+                    )
+                    
+                    if retry_response and len(retry_response) > 0:
+                        retry_text = retry_response[0]['generated_text']
+                        if "[ASSISTANT RESPONSE]" in retry_text:
+                            raw_result = retry_text.split("[ASSISTANT RESPONSE]")[-1].strip()
+                        else:
+                            raw_result = "\n".join(retry_text.split("\n")[retry_prompt.count("\n"):]).strip()
+                            
+                        print("Successfully regenerated response")
+                
+                # Post-process the response to make it more suitable for audio
+                result = post_process_response(raw_result, language)
+                
+                # Ensure we got a meaningful response
+                if not result or len(result) < 15:  # Increased minimum length threshold
+                    print("Generated response too short or invalid, using fallback")
+                    fallback_responses = {
+                        "en": "I'm sorry, I couldn't generate a specific answer to your question. Could you please rephrase your question or provide more details about what you'd like to know?",
+                        "fr": "Je suis désolé, je n'ai pas pu générer une réponse spécifique à votre question. Pourriez-vous reformuler votre question ou fournir plus de détails sur ce que vous souhaitez savoir?",
+                        "ar": "آسف، لم أتمكن من إنشاء إجابة محددة لسؤالك. هل يمكنك إعادة صياغة سؤالك أو تقديم المزيد من التفاصيل حول ما ترغب في معرفته؟"
+                    }
+                    return fallback_responses.get(language, fallback_responses["en"])
+                
                 return result
             else:
                 return "I couldn't generate a response. Please try asking your question differently."
                 
-        except TimeoutException:
-            print("LLM response generation timed out")
-            # Provide a fallback response for timeout
-            timeout_responses = {
-                "en": "I'm still thinking about your question. Please try again as I might need a moment to process complex queries.",
-                "fr": "Je réfléchis toujours à votre question. Veuillez réessayer car il me faut parfois un moment pour traiter des requêtes complexes.",
-                "ar": "ما زلت أفكر في سؤالك. يرجى المحاولة مرة أخرى لأنني قد أحتاج إلى لحظة لمعالجة الاستعلامات المعقدة."
+        except Exception as gen_error:
+            print(f"Error during LLM generation: {gen_error}")
+            error_responses = {
+                "en": "I encountered an error while processing your question. Please try again with a different query.",
+                "fr": "J'ai rencontré une erreur lors du traitement de votre question. Veuillez réessayer avec une autre requête.",
+                "ar": "لقد واجهت خطأ أثناء معالجة سؤالك. يرجى المحاولة مرة أخرى باستخدام استعلام مختلف."
             }
-            return timeout_responses.get(language, timeout_responses["en"])
-            
-        finally:
-            # Reset the signal handler
-            signal.signal(signal.SIGALRM, signal.SIG_DFL)
+            return error_responses.get(language, error_responses["en"])
             
     except Exception as e:
         print(f"Error generating response: {e}")
@@ -1895,75 +2215,63 @@ def ask_question():
         processing_log = []
         
         try:
-            # Set up a timeout for the entire operation
-            import signal
-            from contextlib import contextmanager
+            # Use thread-safe timeout mechanism instead of SIGALRM
+            import threading
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError
             
-            @contextmanager
-            def timeout(seconds):
-                def handler(signum, frame):
-                    raise TimeoutError(f"Operation timed out after {seconds} seconds")
-                
-                # Set the timeout handler
-                original_handler = signal.signal(signal.SIGALRM, handler)
-                signal.alarm(seconds)
+            # Retrieve relevant context
+            processing_log.append("Retrieving context")
+            context = get_rag_context(query)
+            if not context:
+                context = "No specific context available for this query."
+            
+            # Generate text response with timeout
+            processing_log.append("Generating response")
+            
+            with ThreadPoolExecutor() as executor:
+                future = executor.submit(generate_response, query, context, language)
                 try:
-                    yield
-                finally:
-                    signal.alarm(0)
-                    signal.signal(signal.SIGALRM, original_handler)
-
-            # Use a 60-second timeout for the entire operation
-            with timeout(60):
-                # Retrieve relevant context with timeout handling
-                processing_log.append("Retrieving context")
-                context = get_rag_context(query)
-                if not context:
-                    context = "No specific context available for this query."
-                    
-                # Generate text response
-                processing_log.append("Generating response")
-                response = generate_response(query, context, language)
-                
-                # Generate speech if requested
-                speech_file = None
-                if generate_speech_output:
-                    processing_log.append("Generating speech")
-                    speech_file = generate_speech(response, language)
-                
-                # Build the response
-                result = {
-                    "query": query,
-                    "response": response,
-                    "language": language,
-                    "success": True
-                }
-                
-                # Add speech file path if available
-                if speech_file:
-                    result["speech_file"] = speech_file
-                    
-                return jsonify(result)
-                
-        except TimeoutError as timeout_error:
-            # Handle timeout specifically
-            print(f"Request timed out: {str(timeout_error)}")
+                    response = future.result(timeout=60)  # 60 second timeout
+                except TimeoutError:
+                    print("Response generation timed out")
+                    # Return a user-friendly timeout message
+                    timeout_responses = {
+                        "en": "I'm sorry, but your request timed out. Please try a simpler question or try again later.",
+                        "fr": "Je suis désolé, mais votre demande a expiré. Veuillez essayer une question plus simple ou réessayer plus tard.",
+                        "ar": "آسف، لقد انتهت مهلة طلبك. يرجى تجربة سؤال أبسط أو المحاولة مرة أخرى لاحقًا."
+                    }
+                    return jsonify({
+                        "query": query,
+                        "response": timeout_responses.get(language, timeout_responses["en"]),
+                        "language": language,
+                        "success": False,
+                        "error": "Request timed out"
+                    })
             
-            # Return a user-friendly timeout message
-            timeout_responses = {
-                "en": "I'm sorry, but your request timed out. Please try a simpler question or try again later.",
-                "fr": "Je suis désolé, mais votre demande a expiré. Veuillez essayer une question plus simple ou réessayer plus tard.",
-                "ar": "آسف، لقد انتهت مهلة طلبك. يرجى تجربة سؤال أبسط أو المحاولة مرة أخرى لاحقًا."
+            # Generate speech if requested
+            speech_file = None
+            speech_url = None
+            
+            if generate_speech_output:
+                processing_log.append("Generating speech")
+                speech_file = generate_speech(response, language)
+                if speech_file:
+                    speech_url = f"/audio/{os.path.basename(speech_file)}"
+            
+            # Build the response
+            result = {
+                "query": query,
+                "response": response,
+                "language": language,
+                "success": True
             }
             
-            return jsonify({
-                "query": query,
-                "response": timeout_responses.get(language, timeout_responses["en"]),
-                "language": language,
-                "success": False,
-                "error": "Request timed out"
-            })
-            
+            # Add speech file URL if available
+            if speech_url:
+                result["speech_url"] = speech_url
+                
+            return jsonify(result)
+                
         except Exception as inner_e:
             # Log the detailed error for debugging
             print(f"Error processing question: {str(inner_e)}")
@@ -1972,15 +2280,6 @@ def ask_question():
             # Create a user-friendly error message based on the type of error
             error_message = str(inner_e)
             error_response = "I'm having trouble processing your question right now. Please try again later."
-            
-            # Check if it's an abort error
-            if "abort" in error_message.lower() or isinstance(inner_e, TimeoutError):
-                error_responses = {
-                    "en": "Your request was interrupted. Please try a shorter question or try again later.",
-                    "fr": "Votre demande a été interrompue. Veuillez essayer une question plus courte ou réessayer plus tard.",
-                    "ar": "تم إيقاف طلبك. يرجى تجربة سؤال أقصر أو المحاولة مرة أخرى لاحقًا."
-                }
-                error_response = error_responses.get(language, error_responses["en"])
             
             # Return a user-friendly error message
             return jsonify({
@@ -2249,8 +2548,192 @@ def serve_report(filename):
 
 @app.route('/audio/<filename>')
 def serve_audio(filename):
-    """Serve generated audio files"""
-    return send_file(f"{AUDIO_PATH}/{filename}", mimetype='audio/mpeg')
+    """Serve generated audio files with proper headers for streaming"""
+    from flask import Response, stream_with_context
+    import os
+    
+    filepath = f"{AUDIO_PATH}/{filename}"
+    
+    # Verify file exists
+    if not os.path.exists(filepath):
+        return jsonify({"error": "Audio file not found"}), 404
+    
+    # Get file size for Content-Length header
+    file_size = os.path.getsize(filepath)
+    
+    # Stream file in chunks to avoid loading entire file into memory
+    def generate():
+        chunk_size = 4096  # 4KB chunks
+        with open(filepath, 'rb') as audio_file:
+            while True:
+                chunk = audio_file.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+    
+    # Set headers for proper streaming and caching behavior
+    headers = {
+        'Content-Type': 'audio/mpeg',
+        'Content-Length': str(file_size),
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'public, max-age=86400',  # Cache for a day
+        'X-Accel-Buffering': 'yes'  # Enable nginx buffering if using nginx
+    }
+    
+    return Response(
+        stream_with_context(generate()),
+        headers=headers,
+        status=200,
+        mimetype='audio/mpeg',
+        direct_passthrough=True
+    )
+
+@app.route('/ask_tts', methods=['POST'])
+def ask_question_with_tts():
+    """Answer supply chain questions using RAG and return text-to-speech audio with support for long responses"""
+    try:
+        # Validate request data
+        data = request.get_json()
+        if data is None:
+            return jsonify({"error": "Invalid JSON data"}), 400
+        
+        # Extract and validate query
+        query = data.get('query')
+        if not query or not isinstance(query, str):
+            return jsonify({"error": "Missing or invalid 'query' parameter"}), 400
+            
+        # Extract language with default fallback
+        language = data.get('language', 'en')
+        if language not in ['en', 'fr', 'ar']:
+            # Default to English if unsupported language
+            language = 'en'
+        
+        # Check if client wants to handle long responses
+        handle_long_responses = data.get('handle_long_responses', False)
+        
+        # Track processing steps and timing for debugging
+        processing_log = []
+        start_time = datetime.now()
+        
+        def log_step(step_name):
+            elapsed = datetime.now() - start_time
+            processing_log.append(f"{step_name} ({elapsed.total_seconds():.2f}s)")
+            print(f"TTS Processing Step: {step_name} - {elapsed.total_seconds():.2f}s")
+        
+        try:
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError
+            
+            # Retrieve relevant context with timeout protection
+            log_step("Start RAG context retrieval")
+            context = None
+            
+            with ThreadPoolExecutor() as executor:
+                future = executor.submit(get_rag_context, query)
+                try:
+                    context = future.result(timeout=20)  # 20 second timeout for context retrieval
+                except TimeoutError:
+                    print("Context retrieval timed out")
+                    context = "Context retrieval timed out. Proceeding with general knowledge."
+            
+            if not context:
+                context = "No specific context available for this query."
+            
+            log_step("Retrieved context")
+            
+            # Generate text response with timeout
+            with ThreadPoolExecutor() as executor:
+                # Use a longer timeout if client can handle long responses
+                response_timeout = 90 if handle_long_responses else 60
+                
+                log_step(f"Start response generation (timeout: {response_timeout}s)")
+                future = executor.submit(generate_response, query, context, language)
+                try:
+                    response = future.result(timeout=response_timeout)
+                except TimeoutError:
+                    print("Response generation timed out")
+                    timeout_responses = {
+                        "en": "I'm sorry, but your request timed out. Please try a simpler question or try again later.",
+                        "fr": "Je suis désolé, mais votre demande a expiré. Veuillez essayer une question plus simple ou réessayer plus tard.",
+                        "ar": "آسف، لقد انتهت مهلة طلبك. يرجى تجربة سؤال أبسط أو المحاولة مرة أخرى لاحقًا."
+                    }
+                    response = timeout_responses.get(language, timeout_responses["en"])
+            
+            log_step("Response generated")
+            
+            # Clean and format the response for better TTS quality
+            cleaned_response = post_process_response(response, language)
+            print(f"Cleaned response for TTS: {cleaned_response[:100]}...")
+            log_step("Response cleaned for TTS")
+            
+            # Always generate speech for this endpoint
+            log_step("Start speech generation")
+            
+            # Use ThreadPoolExecutor to apply a timeout to speech generation too
+            speech_file = None
+            with ThreadPoolExecutor() as executor:
+                future = executor.submit(generate_speech, cleaned_response, language)
+                try:
+                    speech_file = future.result(timeout=60)  # 60 second timeout for speech generation
+                except TimeoutError:
+                    print("Speech generation timed out")
+                    # Create a shorter version of the response for speech
+                    short_response = cleaned_response[:2000] + "... (Response truncated for audio)"
+                    speech_file = generate_speech(short_response, language)
+            
+            speech_url = f"/audio/{os.path.basename(speech_file)}" if speech_file else None
+            log_step("Speech generated")
+            
+            # Return both text and speech URL along with processing info for debugging
+            return jsonify({
+                "query": query,
+                "response": response,
+                "language": language,
+                "speech_url": speech_url,
+                "success": True,
+                "processing_info": {
+                    "steps": processing_log,
+                    "total_time": (datetime.now() - start_time).total_seconds()
+                }
+            })
+                
+        except Exception as inner_e:
+            log_step(f"Error: {str(inner_e)}")
+            print(f"Error processing TTS question: {str(inner_e)}")
+            
+            error_responses = {
+                "en": "I'm having trouble processing your question right now. Please try again later.",
+                "fr": "J'ai du mal à traiter votre question en ce moment. Veuillez réessayer plus tard.",
+                "ar": "أواجه صعوبة في معالجة سؤالك الآن. يرجى المحاولة مرة أخرى لاحقًا."
+            }
+            error_response = error_responses.get(language, error_responses["en"])
+            
+            # Clean the error response for TTS
+            cleaned_error = post_process_response(error_response, language)
+            
+            # Generate speech for error message too
+            try:
+                speech_file = generate_speech(cleaned_error, language)
+                speech_url = f"/audio/{os.path.basename(speech_file)}" if speech_file else None
+            except:
+                speech_url = None
+            
+            return jsonify({
+                "query": query,
+                "response": error_response,
+                "language": language,
+                "speech_url": speech_url,
+                "success": False,
+                "error": str(inner_e),
+                "processing_info": {
+                    "steps": processing_log,
+                    "total_time": (datetime.now() - start_time).total_seconds()
+                }
+            }), 500
+            
+    except Exception as e:
+        print(f"Error with ask_tts request: {str(e)}")
+        return jsonify({"error": f"Request error: {str(e)}"}), 400
+
 
 @app.route('/upload_audio', methods=['POST'])
 def upload_audio():
@@ -2283,7 +2766,7 @@ def upload_audio():
             return jsonify({
                 "transcription": transcription,
                 "response": response,
-                "speech_file": f"/audio/{os.path.basename(speech_file)}" if speech_file else None
+                "speech_url": f"/audio/{os.path.basename(speech_file)}" if speech_file else None
             })
         else:
             return jsonify({"error": "Could not transcribe audio"}), 500
