@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, ScrollView, ActivityIndicator } from 'react-native';
-import { Image } from 'expo-image';
+import { StyleSheet, View, ScrollView, ActivityIndicator,Text, TextInput } from 'react-native';
 import { Stack } from 'expo-router';
 import { WebView } from 'react-native-webview';
 
@@ -8,10 +7,12 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import { api } from '@/services/apiClient';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useForm, Controller } from "react-hook-form"
+import * as yup from 'yup';
+import { yupResolver } from '@hookform/resolvers/yup';
 
 interface ForecastResult {
   chart_data?: any;
@@ -25,7 +26,7 @@ interface ForecastResult {
 export default function ForecastScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  
+
   const [productId, setProductId] = useState('');
   const [days, setDays] = useState('30');
   const [loading, setLoading] = useState(false);
@@ -33,23 +34,42 @@ export default function ForecastScreen() {
   const [error, setError] = useState('');
   const [plotHtml, setPlotHtml] = useState('');
 
+  const schema = yup.object().shape({
+    productId: yup.string().required('Product ID is required'),
+    days: yup.number().min(1, 'Days must be at least 1').max(365, 'Days cannot exceed 365').required('Days is required'),
+  });
+  type FormData = {
+  productId: string;
+  days: number;
+};
+
+  
+    const {
+      control,
+      handleSubmit,
+      formState: { errors },
+    } = useForm<FormData>({
+      resolver: yupResolver(schema),
+    })
+
+
   const generateForecast = async () => {
     if (!productId) {
       setError('Please enter a product ID');
       return;
     }
-    
+
     setLoading(true);
     setError('');
-    
+
     try {
       const response = await api.getForecast({
         product_id: productId,
         days: parseInt(days) || 30,
       });
-      
+
       setForecastData(response);
-      
+
       // If we have chart data, create a simple plot
       if (response.chart_data) {
         const htmlContent = generatePlotHtml(response.chart_data);
@@ -101,43 +121,31 @@ export default function ForecastScreen() {
   return (
     <ThemedView style={styles.container}>
       <Stack.Screen options={{ title: "Demand Forecast", headerShown: true }} />
-      
+
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
         <ThemedText type="subtitle">Generate Demand Forecast</ThemedText>
-        
-        <Card style={styles.formCard}>
-          <Input
-            label="Product ID"
-            placeholder="Enter product ID (e.g., smartphone)"
-            value={productId}
-            onChangeText={setProductId}
-            error={error}
-          />
-          
-          <Input
-            label="Forecast Period (Days)"
-            placeholder="30"
-            value={days}
-            onChangeText={setDays}
-            keyboardType="numeric"
-          />
-          
-          <Button
-            text="Generate Forecast"
-            onPress={generateForecast}
-            loading={loading}
-          />
-        </Card>
-        
+        <View>
+          <Text>Product ID</Text>
+          <Controller
+            control={control}
+            name="productId"
+            render={({ field: { onChange, value } }) => (
+              <TextInput
+                placeholder="Enter Product ID"
+                value={value}
+                onChangeText={onChange}
+              />
+            )}/>
+        </View>
         {loading && (
           <ActivityIndicator size="large" color={colors.tint} style={styles.loader} />
         )}
-        
+
         {forecastData && !loading && (
           <View style={styles.resultsContainer}>
             <Card style={styles.chartCard}>
               <ThemedText type="subtitle">Forecast Chart</ThemedText>
-              
+
               <View style={styles.webViewContainer}>
                 <WebView
                   source={{ html: plotHtml }}
@@ -155,10 +163,10 @@ export default function ForecastScreen() {
                 />
               </View>
             </Card>
-            
+
             <Card style={styles.metricsCard}>
               <ThemedText type="subtitle">Forecast Metrics</ThemedText>
-              
+
               {forecastData.metrics && (
                 <View style={styles.metrics}>
                   <MetricItem
@@ -175,7 +183,7 @@ export default function ForecastScreen() {
                   />
                 </View>
               )}
-              
+
               <Button
                 onPress={() => {
                   // This would typically open a PDF report
