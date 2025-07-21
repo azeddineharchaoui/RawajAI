@@ -1,0 +1,17 @@
+transformers==4.35.0
+langchain-huggingface==0.3.0
+torch
+torchaudio
+flask
+pandas
+numpy
+matplotlib
+seaborn
+plotly
+gtts
+pytrends
+langchain-community
+accelerate
+protobuf
+scipy
+statsmodels
