@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, ScrollView, ActivityIndicator,Text, TextInput } from 'react-native';
+import { StyleSheet, View, ScrollView, ActivityIndicator, Text, TextInput } from 'react-native';
 import { Stack } from 'expo-router';
 import { WebView } from 'react-native-webview';
 
@@ -39,18 +39,18 @@ export default function ForecastScreen() {
     days: yup.number().min(1, 'Days must be at least 1').max(365, 'Days cannot exceed 365').required('Days is required'),
   });
   type FormData = {
-  productId: string;
-  days: number;
-};
+    productId: string;
+    days: number;
+  };
 
-  
-    const {
-      control,
-      handleSubmit,
-      formState: { errors },
-    } = useForm<FormData>({
-      resolver: yupResolver(schema),
-    })
+
+  const {
+    control,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<FormData>({
+    resolver: yupResolver(schema),
+  })
 
 
   const generateForecast = async () => {
@@ -125,17 +125,32 @@ export default function ForecastScreen() {
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
         <ThemedText type="subtitle">Generate Demand Forecast</ThemedText>
         <View>
-          <Text>Product ID</Text>
+          <Text style = {styles.label}>Product ID</Text>
           <Controller
             control={control}
             name="productId"
             render={({ field: { onChange, value } }) => (
               <TextInput
                 placeholder="Enter Product ID"
+                placeholderTextColor="grey"
+                style={styles.inputs}
                 value={value}
                 onChangeText={onChange}
               />
-            )}/>
+            )} />
+          <Controller
+            control={control}
+            name="productId"
+            render={({ field: { onChange, value } }) => (
+              <TextInput
+                keyboardType='numeric'
+                placeholder="Enter Product ID"
+                placeholderTextColor="grey"
+                style={styles.inputs}
+                value={value}
+                onChangeText={onChange}
+              />
+            )} />
         </View>
         {loading && (
           <ActivityIndicator size="large" color={colors.tint} style={styles.loader} />
@@ -211,6 +226,24 @@ const MetricItem = ({ label, value }: { label: string; value: string | number })
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  inputs: {
+    width: '100%',
+    paddingTop: 5,
+    paddingBottom: 5,
+    paddingLeft: 10,
+    paddingRight: 10,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(209, 197, 197, 0.43)',
+    backgroundColor: 'transparent',
+  },
+  label:{
+    marginBottom: 8,
+    color: '#dde3e7ff',
+    fontSize: 16,
+    fontWeight: '500',
+    marginTop: 16,
   },
   scrollView: {
     flex: 1,
