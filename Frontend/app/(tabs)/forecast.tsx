@@ -124,8 +124,8 @@ export default function ForecastScreen() {
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
         <ThemedText type="subtitle">Generate Demand Forecast</ThemedText>
-        <View>
-          <Text style = {styles.label}>Product ID</Text>
+        <View style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignSelf: "center", width: '80%', alignContent: 'center' }}>
+          <Text style={styles.label}>Product ID</Text>
           <Controller
             control={control}
             name="productId"
@@ -138,16 +138,17 @@ export default function ForecastScreen() {
                 onChangeText={onChange}
               />
             )} />
+          <Text style={styles.label}>Forcast Period ( Days )</Text>
           <Controller
             control={control}
-            name="productId"
+            name="days"
             render={({ field: { onChange, value } }) => (
               <TextInput
                 keyboardType='numeric'
-                placeholder="Enter Product ID"
+                placeholder=""
                 placeholderTextColor="grey"
                 style={styles.inputs}
-                value={value}
+                value={value !== undefined && value !== null ? String(value) : "30"}
                 onChangeText={onChange}
               />
             )} />
@@ -233,12 +234,12 @@ const styles = StyleSheet.create({
     paddingBottom: 5,
     paddingLeft: 10,
     paddingRight: 10,
-    borderRadius: 15,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: 'rgba(209, 197, 197, 0.43)',
     backgroundColor: 'transparent',
   },
-  label:{
+  label: {
     marginBottom: 8,
     color: '#dde3e7ff',
     fontSize: 16,
