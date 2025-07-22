@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { ActivityIndicator, StyleSheet, View, ScrollView, TouchableOpacity,ImageBackground, Dimensions } from 'react-native';
+import { ActivityIndicator, StyleSheet, View, ScrollView, TouchableOpacity, ImageBackground, Dimensions } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 
@@ -11,14 +11,15 @@ import { api } from '@/services/api';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import ApiConeection from '@/components/home/ApiConeection';
-const {width, height} = Dimensions.get('window');
+import StatCard from '@/components/home/stateCard';
+import ActionButton from '@/components/home/QuickActions';
 
 export default function DashboardScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const [loading, setLoading] = useState(true);
-  const [tunnelStatus, setTunnelStatus] = useState<{status: string, url?: string} | null>(null);
+  const [tunnelStatus, setTunnelStatus] = useState<{ status: string, url?: string } | null>(null);
   const [dashboardData, setDashboardData] = useState({
     pendingAlerts: 3,
     totalProducts: 15,
@@ -65,7 +66,7 @@ export default function DashboardScreen() {
           resizeMode='cover'
         />
       }>
-      
+
       {/* API Connection Status */}
       <ApiConeection />
 
@@ -73,57 +74,59 @@ export default function DashboardScreen() {
 
       {/* Overview Cards */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cardsScroll}>
-        <StatCard 
-          title="Products"
-          value={dashboardData.totalProducts.toString()}
-          icon="shippingbox.fill"
-          onPress={() => router.push('/(tabs)/inventory')}
-        />
-        <StatCard 
-          title="Low Stock"
-          value={dashboardData.lowStockItems.toString()}
-          icon="exclamationmark.triangle.fill"
-          color="#E53E3E"
-          onPress={() => router.push('/(tabs)/inventory')}
-        />
-        <StatCard 
-          title="Anomalies"
-          value={dashboardData.anomalyCount.toString()}
-          icon="waveform.path.ecg"
-          color="#DD6B20"
-          onPress={() => router.push('/(tabs)/analytics')}
-        />
-        <StatCard 
-          title="Alerts"
-          value={dashboardData.pendingAlerts.toString()}
-          icon="bell.fill"
-          color="#3182CE"
-          onPress={() => router.push('/(tabs)')}
-        />
+        <View style={{ flexDirection: 'row', paddingVertical: 16, justifyContent: 'space-between' }}>
+          <StatCard
+            title="Products"
+            value={dashboardData.totalProducts.toString()}
+            icon={require('@/assets/images/product.png')}
+            onPress={() => router.push('/(tabs)/inventory')}
+          />
+          <StatCard
+            title="Low Stock"
+            value={dashboardData.lowStockItems.toString()}
+            icon={require('@/assets/images/lowStock.png')}
+            color="#E53E3E"
+            onPress={() => router.push('/(tabs)/inventory')}
+          />
+          <StatCard
+            title="Anomalies"
+            value={dashboardData.anomalyCount.toString()}
+            icon={require('@/assets/images/anomalies.png')}
+            color="#DD6B20"
+            onPress={() => router.push('/(tabs)/analytics')}
+          />
+          <StatCard
+            title="Alerts"
+            value={dashboardData.pendingAlerts.toString()}
+            icon={require('@/assets/images/Alerts.png')}
+            color="#3182CE"
+            onPress={() => router.push('/(tabs)')}
+          />
+        </View>
       </ScrollView>
 
       {/* Quick Actions */}
       <ThemedView style={styles.sectionContainer}>
         <ThemedText type="subtitle">Quick Actions</ThemedText>
         <View style={styles.actionGrid}>
-          <ActionButton 
+          <ActionButton
             title="Demand Forecast"
-            icon="chart.line.uptrend.xyaxis.circle.fill"
+            icon={require('@/assets/images/Forecast.png')}
             onPress={() => router.push('/(tabs)/forecast')}
           />
-          <ActionButton 
+          <ActionButton
             title="Inventory Optimization"
-            icon="cube.box.fill"
+            icon={require('@/assets/images/optimisation.png')}
             onPress={() => router.push('/(tabs)/inventory')}
           />
-          <ActionButton 
+          <ActionButton
             title="Ask Assistant"
-            icon="text.bubble.fill"
+            icon={require('@/assets/images/assistent.png')}
             onPress={() => router.push('/(tabs)/assistant')}
           />
-          <ActionButton 
+          <ActionButton
             title="Generate Report"
-            icon="doc.text.fill"
+            icon={require('@/assets/images/reporti.webp')}
             onPress={() => router.push('/(tabs)/analytics')}
           />
         </View>
@@ -132,18 +135,18 @@ export default function DashboardScreen() {
       {/* Recent Activity */}
       <ThemedView style={styles.sectionContainer}>
         <ThemedText type="subtitle">Recent Activity</ThemedText>
-        <ActivityItem 
-          title="Anomaly Detected" 
+        <ActivityItem
+          title="Anomaly Detected"
           description="Unusual demand pattern for product ID: SM-5432"
           time="2h ago"
         />
-        <ActivityItem 
-          title="Forecast Updated" 
+        <ActivityItem
+          title="Forecast Updated"
           description="Quarterly demand forecast has been updated"
           time="5h ago"
         />
-        <ActivityItem 
-          title="Inventory Optimized" 
+        <ActivityItem
+          title="Inventory Optimized"
           description="Stock levels have been optimized for 12 products"
           time="1d ago"
         />
@@ -152,51 +155,6 @@ export default function DashboardScreen() {
   );
 }
 
-// Stat Card Component
-const StatCard = ({ title, value, icon, color = '#38A169', onPress }: { 
-  title: string;
-  value: string;
-  icon: string;
-  color?: string;
-  onPress: () => void;
-}) => {
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
-  
-  return (
-    <TouchableOpacity onPress={onPress}>
-      <Card style={styles.statCard}>
-        <View style={[styles.iconContainer, { backgroundColor: color + '20' }]}>
-          <View style={styles.icon}>
-            {/* Using a colored View since we can't easily colorize IconSymbol */}
-            <View style={[styles.iconInner, { backgroundColor: color }]} />
-          </View>
-        </View>
-        <ThemedText type="defaultSemiBold" style={styles.statValue}>{value}</ThemedText>
-        <ThemedText style={styles.statTitle}>{title}</ThemedText>
-      </Card>
-    </TouchableOpacity>
-  );
-};
-
-// Action Button Component
-const ActionButton = ({ title, icon, onPress }: {
-  title: string;
-  icon: string;
-  onPress: () => void;
-}) => {
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
-  
-  return (
-    <TouchableOpacity onPress={onPress} style={styles.actionButton}>
-      <View style={[styles.actionIcon, { backgroundColor: colors.tint + '20' }]}>
-        <View style={[styles.iconInner, { backgroundColor: colors.tint }]} />
-      </View>
-      <ThemedText style={styles.actionTitle} numberOfLines={2}>{title}</ThemedText>
-    </TouchableOpacity>
-  );
-};
 
 // Activity Item Component
 const ActivityItem = ({ title, description, time }: {
@@ -206,7 +164,7 @@ const ActivityItem = ({ title, description, time }: {
 }) => {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  
+
   return (
     <ThemedView style={styles.activityItem}>
       <View style={styles.activityDot} />
@@ -259,6 +217,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   cardsScroll: {
+    width: '100%',
     marginHorizontal: -16,
     paddingHorizontal: 16,
     marginBottom: 16,

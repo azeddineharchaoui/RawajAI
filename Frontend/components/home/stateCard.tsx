@@ -1,48 +1,40 @@
-import React from 'react'
-import { ActivityIndicator, StyleSheet, View, ScrollView, TouchableOpacity, ImageBackground, Dimensions } from 'react-native';
-import { useState, useEffect } from 'react';
+import { Image } from 'expo-image';
+import { StyleSheet, View, TouchableOpacity } from 'react-native';
+
 import { ThemedText } from '@/components/ThemedText';
 import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { api } from '@/services/api';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { Link, Link2Off, LucideLink2Off } from 'lucide-react-native';
-import { red } from 'react-native-reanimated/lib/typescript/Colors';
 
-const ApiConeection = () => {
-    const [loading, setLoading] = useState(true);
-    const colorScheme = useColorScheme() as 'light' | 'dark';
+// Stat Card Component
+const StatCard = ({ title, value, icon, color = '#38A169', onPress }: {
+    title: string;
+    value: string;
+    icon: number|string;
+    color?: string;
+    onPress: () => void;
+}) => {
+    const colorScheme = useColorScheme();
     const colors = Colors[colorScheme ?? 'light'];
-    const [tunnelStatus, setTunnelStatus] = useState<{ status: string, url?: string } | null>(null);
 
-    const startTunnel = async () => {
-        setLoading(true);
-        try {
-            const result = await api.startTunnel();
-            console.log('Tunnel started:', result);
-            setTunnelStatus(result);
-        } catch (error) {
-            console.log('Error starting tunnel:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-    useEffect(() => { startTunnel() }, [])
     return (
-        <>
-            <View style={styles.circles}>
-                {loading ? (
-                    <ActivityIndicator size="small" color={colors.tint} style={styles.loader} />
-                ) : tunnelStatus?.status === 'already_running' ? (
-                    <Link color={"green"} />
-                ) : (
-                    <LucideLink2Off color={"red"} onPress={startTunnel} />
-                )}
-            </View>
-        </>
-    )
-}
+        <TouchableOpacity onPress={onPress}>
+            <Card style={styles.statCard}>
+                <View style={[styles.iconContainer, { backgroundColor: color + '20' }]}>
+                    <View style={styles.icon}>
+                        {/* Using a colored View since we can't easily colorize IconSymbol */}
+                        <Image source={icon} style={{ width: 50, height: 50 }} />
+                    </View>
+                </View>
+                <ThemedText type="defaultSemiBold" style={styles.statValue}>{value}</ThemedText>
+                <ThemedText style={styles.statTitle}>{title}</ThemedText>
+            </Card>
+        </TouchableOpacity>
+    );
+};
+
+export default StatCard;
+
 
 const styles = StyleSheet.create({
     logo: {
@@ -176,15 +168,4 @@ const styles = StyleSheet.create({
         opacity: 0.5,
         marginTop: 4,
     },
-    circles: {
-        justifyContent: 'center',
-        alignItems: 'center',
-        width: 70,
-        height: 70,
-        borderRadius: "90px",
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    }
 });
-
-
-export default ApiConeection
