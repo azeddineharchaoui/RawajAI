@@ -30,13 +30,14 @@ export default function ForecastScreen() {
   const [productId, setProductId] = useState('');
   const [loading, setLoading] = useState(false);
   const [forecastData, setForecastData] = useState<ForecastResult | null>(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<any>('');
   const [plotHtml, setPlotHtml] = useState('');
 
   const schema = yup.object().shape({
     productId: yup.string().required('Product ID is required'),
     days: yup.number().min(1, 'Days must be at least 1').max(365, 'Days cannot exceed 365').required('Days is required').default(30),
   });
+
   type FormData = {
     productId: string;
     days: number;
@@ -76,9 +77,9 @@ export default function ForecastScreen() {
         const htmlContent = generatePlotHtml(response.chart_data);
         setPlotHtml(htmlContent);
       }
-    } catch (error) {
+    } catch (error:any) {
       console.log('Forecast error:', error);
-      setError('Failed to generate forecast. Please try again.');
+      setError(error.message || 'An error occurred while generating the forecast');
     } finally {
       setLoading(false);
     }
@@ -118,52 +119,102 @@ export default function ForecastScreen() {
       </html>
     `;
   };
-
   return (
+
     <ThemedView style={styles.container}>
-      <Stack.Screen options={{ title: "Demand Forecast", headerShown: true }} />
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
-        <ThemedText type="subtitle">Generate Demand Forecast</ThemedText>
-        <View style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignSelf: "center", width: '80%', alignContent: 'center' }}>
-          <Text style={styles.label}>Product ID</Text>
+      <View
+        style={{
+          marginVertical: 40,
+          marginHorizontal:20,
+          paddingHorizontal: 20,
+          paddingVertical: 10,
+          backgroundColor: colors ? '#1f2937' : '#f0f4ff',
+          borderRadius: 12,
+          shadowColor: '#000',
+          shadowOpacity: 0.1,
+          shadowOffset: { width: 0, height: 2 },
+          shadowRadius: 5,
+          elevation: 3,
+        }}
+      >
+        <Text
+          style={{
+            fontSize: 20,
+            fontWeight: '600',
+            color: colors ? '#ffffff' : '#1e3a8a',
+          }}
+        >
+          📈 Forecast Results
+        </Text>
+        <Text
+          style={{
+            fontSize: 14,
+            color: colors ? '#cbd5e1' : '#475569',
+            marginTop: 4,
+          }}
+        >
+          Predicted trends and performance metrics
+        </Text>
+      </View>
+        <View
+          style={{
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignSelf: 'center',
+            width: '90%',
+            paddingVertical: 16,
+          }}
+        >
+          <Text style={styles.labelStyle}>Product ID</Text>
           <Controller
             control={control}
             name="productId"
             render={({ field: { onChange, value } }) => (
               <TextInput
                 placeholder="Enter Product ID"
-                placeholderTextColor="grey"
-                style={styles.inputs}
+                placeholderTextColor={Colors ? '#888' : '#999'}
+                style={styles.inputStyle}
                 value={value}
                 onChangeText={onChange}
               />
-            )} />
-          {errors.productId && <Text style={{ color: 'red' }}>{errors.productId.message}</Text>}
-          <Text style={styles.label}>Forcast Period ( Days )</Text>
+            )}
+          />
+          {errors.productId && <Text style={styles.errorStyle}>{errors.productId.message}</Text>}
+
+          <Text style={styles.labelStyle}>Forecast Period (Days)</Text>
           <Controller
             control={control}
             name="days"
             render={({ field: { onChange, value } }) => (
               <TextInput
-                keyboardType='numeric'
+                keyboardType="numeric"
                 placeholder="30"
-                placeholderTextColor="#666c6fff"
-                style={styles.inputs}
-                value={value !== undefined && value !== null ? String(value) : "30"}
+                placeholderTextColor={Colors ? '#888' : '#999'}
+                style={styles.inputStyle}
+                value={value !== undefined && value !== null ? String(value) : '30'}
                 onChangeText={onChange}
               />
-            )} />
-          {errors.days && <Text style={{ color: 'red' }}>{errors.days.message}</Text>}
-          {loading ? (
-            <ActivityIndicator size="large" color={colors.tint} style={styles.loader} />
-          ) : <Button
-            onPress={handleSubmit(generateForecast)}
-            style={{ marginTop: 16, backgroundColor: "#4A90E2" }}
-            disabled={loading}
-            text="Generate Forecast"
-          />}
+            )}
+          />
+          {errors.days && <Text style={styles.errorStyle}>{errors.days.message}</Text>}
 
+          {loading ? (
+            <ActivityIndicator size="large" color={colors.tint} style={{ marginTop: 32 }} />
+          ) : (
+            <Button
+              onPress={handleSubmit(generateForecast)}
+              style={{
+                marginTop: 24,
+                backgroundColor: '#4A90E2',
+                paddingVertical: 12,
+                borderRadius: 8,
+              }}
+              disabled={loading}
+              text="Generate Forecast"
+            />
+          )}
         </View>
         {loading && (
           <ActivityIndicator size="large" color={colors.tint} style={styles.loader} />
@@ -237,6 +288,31 @@ const MetricItem = ({ label, value }: { label: string; value: string | number })
 );
 
 const styles = StyleSheet.create({
+  inputStyle : {
+    width: '100%',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors ? '#444' : '#ccc',
+    backgroundColor: Colors ? '#1c1c1e' : '#fff',
+    color: Colors ? '#f2f2f2' : '#1c1c1e',
+    marginTop: 6,
+  },
+
+  labelStyle : {
+    marginTop: 16,
+    marginBottom: 6,
+    fontSize: 16,
+    fontWeight: '500',
+    color: Colors ? '#dde3e7ff' : '#333',
+  },
+
+   errorStyle : {
+    color: '#E53E3E',
+    fontSize: 13,
+    marginTop: 4,
+  },
   container: {
     flex: 1,
   },
