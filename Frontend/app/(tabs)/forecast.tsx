@@ -28,7 +28,6 @@ export default function ForecastScreen() {
   const colors = Colors[colorScheme ?? 'light'];
 
   const [productId, setProductId] = useState('');
-  const [days, setDays] = useState('30');
   const [loading, setLoading] = useState(false);
   const [forecastData, setForecastData] = useState<ForecastResult | null>(null);
   const [error, setError] = useState('');
@@ -36,7 +35,7 @@ export default function ForecastScreen() {
 
   const schema = yup.object().shape({
     productId: yup.string().required('Product ID is required'),
-    days: yup.number().min(1, 'Days must be at least 1').max(365, 'Days cannot exceed 365').required('Days is required'),
+    days: yup.number().min(1, 'Days must be at least 1').max(365, 'Days cannot exceed 365').required('Days is required').default(30),
   });
   type FormData = {
     productId: string;
@@ -53,7 +52,10 @@ export default function ForecastScreen() {
   })
 
 
-  const generateForecast = async () => {
+  const generateForecast = async (data: FormData) => {
+    const { productId, days } = data;
+    setProductId(productId);
+
     if (!productId) {
       setError('Please enter a product ID');
       return;
@@ -65,18 +67,17 @@ export default function ForecastScreen() {
     try {
       const response = await api.getForecast({
         product_id: productId,
-        days: parseInt(days) || 30,
+        days: days,
       });
 
       setForecastData(response);
-
       // If we have chart data, create a simple plot
       if (response.chart_data) {
         const htmlContent = generatePlotHtml(response.chart_data);
         setPlotHtml(htmlContent);
       }
     } catch (error) {
-      console.error('Forecast error:', error);
+      console.log('Forecast error:', error);
       setError('Failed to generate forecast. Please try again.');
     } finally {
       setLoading(false);
@@ -138,6 +139,7 @@ export default function ForecastScreen() {
                 onChangeText={onChange}
               />
             )} />
+          {errors.productId && <Text style={{ color: 'red' }}>{errors.productId.message}</Text>}
           <Text style={styles.label}>Forcast Period ( Days )</Text>
           <Controller
             control={control}
@@ -145,13 +147,23 @@ export default function ForecastScreen() {
             render={({ field: { onChange, value } }) => (
               <TextInput
                 keyboardType='numeric'
-                placeholder=""
-                placeholderTextColor="grey"
+                placeholder="30"
+                placeholderTextColor="#666c6fff"
                 style={styles.inputs}
                 value={value !== undefined && value !== null ? String(value) : "30"}
                 onChangeText={onChange}
               />
             )} />
+          {errors.days && <Text style={{ color: 'red' }}>{errors.days.message}</Text>}
+          {loading ? (
+            <ActivityIndicator size="large" color={colors.tint} style={styles.loader} />
+          ) : <Button
+            onPress={handleSubmit(generateForecast)}
+            style={{ marginTop: 16, backgroundColor: "#4A90E2" }}
+            disabled={loading}
+            text="Generate Forecast"
+          />}
+
         </View>
         {loading && (
           <ActivityIndicator size="large" color={colors.tint} style={styles.loader} />
@@ -238,6 +250,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(209, 197, 197, 0.43)',
     backgroundColor: 'transparent',
+    color: '#dde3e7ff',
   },
   label: {
     marginBottom: 8,
