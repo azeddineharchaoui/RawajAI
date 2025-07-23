@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 // Default API URL - for local dev testing
-const DEFAULT_API_URL = 'https://curves-apr-suffer-conduct.trycloudflare.com';
+const DEFAULT_API_URL = 'https://annotation-mixture-consultant-recreation.trycloudflare.com';
 const API_URL = Constants.expoConfig?.extra?.apiUrl || DEFAULT_API_URL;
 const TUNNEL_KEY = 'tunnel_url_key'; // Must be a simple string key for SecureStore - no URL characters
 
@@ -49,6 +49,26 @@ export interface ReportParams {
 export interface DocumentParams {
   document: string;
   language?: string;
+}
+
+export interface DocumentUploadParams {
+  uri: string;
+  name: string;
+  type: string;
+  language?: string;
+}
+
+export interface DocumentListResponse {
+  status: 'success' | 'error';
+  message: string;
+  documents: Array<{
+    id: string;
+    filename: string;
+    type: string;
+    chunks: number;
+    added_at: string;
+    size_kb: number;
+  }>;
 }
 
 export interface AudioUploadParams {
@@ -571,6 +591,23 @@ export class ApiClient {
     return this.post('/add_document', { document, language });
   }
   
+  async uploadDocument(fileUri: string, filename: string, type = 'application/pdf', language = 'en') {
+    const formData = new FormData();
+    // @ts-ignore
+    formData.append('file', {
+      uri: fileUri,
+      name: filename,
+      type: type,
+    });
+    formData.append('language', language);
+    
+    return this.post('/add_document', formData, true);
+  }
+  
+  async listDocuments(language = 'en') {
+    return this.get(`/documents?language=${language}`);
+  }
+  
   async uploadAudio(audioFile: AudioUploadParams) {
     const formData = new FormData();
     // @ts-ignore
@@ -580,9 +617,10 @@ export class ApiClient {
       type: audioFile.type || 'audio/m4a',
     });
     
-    if (audioFile.language) {
-      formData.append('language', audioFile.language);
-    }
+    // Default to 'auto' for language detection if not specified
+    const language = audioFile.language || 'auto';
+    formData.append('language', language);
+    console.log(`Uploading audio with language setting: ${language}`);
     
     return this.post('/upload_audio', formData, true);
   }
@@ -601,9 +639,10 @@ export class ApiClient {
       type: audioFile.type || 'audio/wav',
     });
     
-    if (audioFile.language) {
-      formData.append('language', audioFile.language);
-    }
+    // Default to 'auto' for language detection if not specified
+    const language = audioFile.language || 'auto';
+    formData.append('language', language);
+    console.log(`Transcribing audio with language setting: ${language}`);
     
     // Add whisperCompatible flag for WAV files recorded by our service
     if (audioFile.type?.includes('wav')) {
