@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { StyleSheet, View, FlatList, KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { Stack } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import {audioRecorder} from '@/services/AudioRecorderService'; // Import the audio recorder service
 // Audio playback is handled by the AudioPlayerService
 
 import { ThemedText } from '@/components/ThemedText';
@@ -166,16 +167,18 @@ export default function AssistantScreen() {
     setIsRecording(!isRecording);
     
     if (!isRecording) {
-      // Start recording logic would go here
-      console.log('Start recording');
+      // Start recording
+      try {
+        await audioRecorder.startRecording();
+        console.log('Recording started');
+      } catch (error) {
+        console.error('Error starting recording:', error);
+        setIsRecording(false);
+      }
     } else {
       // Stop recording and process audio
-      console.log('Stop recording');
-      
       try {
-        // This is a placeholder - in a real app, you'd get the audio file and upload it
         setLoading(true);
-        // Prepare to handle audio response
         
         // Add a message showing what we're doing
         const processingMessage: Message = {
@@ -187,13 +190,68 @@ export default function AssistantScreen() {
         
         setMessages(prev => [...prev, processingMessage]);
         
-        // const response = await api.uploadAudio(audioFile);
+        // Stop recording and get the audio file URI
+        const uri = await audioRecorder.stopRecording();
         
-        // In a real implementation, you'd process the response here
+        if (!uri) {
+          throw new Error('No recording available');
+        }
+        
+        // Process the recording (transcribe and get TTS response)
+        const result = await audioRecorder.processRecording(uri);
+        
+        if (result.success && result.transcription) {
+          // Add user's transcribed message
+          const userMessage: Message = {
+            id: Date.now().toString(),
+            text: result.transcription,
+            isUser: true,
+            timestamp: new Date(),
+          };
+          
+          // Add AI's response
+          const botMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            text: result.response || "I couldn't understand that. Could you try again?",
+            isUser: false,
+            timestamp: new Date(),
+            speechUrl: result.speech_url,
+          };
+          
+          setMessages(prev => [
+            ...prev.filter(m => m.id !== processingMessage.id), // Remove processing message
+            userMessage,
+            botMessage,
+          ]);
+          
+          // Auto-play the response if available
+          if (result.speech_url) {
+            setCurrentPlayingUrl(result.speech_url);
+            try {
+              await audioPlayer.playAudio(result.speech_url);
+              setIsSpeaking(true);
+            } catch (audioError) {
+              console.log('Audio playback failed:', audioError);
+            }
+          }
+        } else {
+          throw new Error(result.error || 'Failed to process audio');
+        }
       } catch (error) {
         console.error('Error processing audio:', error);
+        const errorMessage: Message = {
+          id: Date.now().toString(),
+          text: "Sorry, I couldn't process your voice message. Please try again.",
+          isUser: false,
+          timestamp: new Date(),
+        };
+        setMessages(prev => [
+          ...prev.filter(m => m.text !== "Processing your voice message..."),
+          errorMessage,
+        ]);
       } finally {
         setLoading(false);
+        setIsRecording(false);
       }
     }
   };

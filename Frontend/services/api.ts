@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 // Default API URL - for local dev testing
-const DEFAULT_API_URL = 'https://vermont-length-perspectives-pas.trycloudflare.com';
+const DEFAULT_API_URL = 'https://curves-apr-suffer-conduct.trycloudflare.com';
 const API_URL = Constants.expoConfig?.extra?.apiUrl || DEFAULT_API_URL;
 const TUNNEL_KEY = 'tunnel_url_key'; // Must be a simple string key for SecureStore - no URL characters
 
@@ -585,6 +585,32 @@ export class ApiClient {
     }
     
     return this.post('/upload_audio', formData, true);
+  }
+
+  /**
+   * Transcribe audio to text only (without generating a response)
+   * @param audioFile The audio file to transcribe
+   * @returns Promise with transcription result
+   */
+  async transcribeAudio(audioFile: AudioUploadParams) {
+    const formData = new FormData();
+    // @ts-ignore
+    formData.append('audio', {
+      uri: audioFile.uri,
+      name: audioFile.name || 'audio.wav',
+      type: audioFile.type || 'audio/wav',
+    });
+    
+    if (audioFile.language) {
+      formData.append('language', audioFile.language);
+    }
+    
+    // Add whisperCompatible flag for WAV files recorded by our service
+    if (audioFile.type?.includes('wav')) {
+      formData.append('whisperCompatible', 'true');
+    }
+    
+    return this.post('/transcribe_audio', formData, true);
   }
 
   

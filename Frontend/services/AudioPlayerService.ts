@@ -5,7 +5,7 @@ import Constants from 'expo-constants';
 
 // Import the same DEFAULT_API_URL from api.ts to ensure consistency
 // Import the same DEFAULT_API_URL from api.ts to ensure consistency
-const DEFAULT_API_URL = 'https://vermont-length-perspectives-pas.trycloudflare.com';
+const DEFAULT_API_URL = 'https://curves-apr-suffer-conduct.trycloudflare.com';
 const API_URL = Constants.expoConfig?.extra?.apiUrl || DEFAULT_API_URL;
 
 // Base URL helper function that uses the same logic as api.ts
@@ -36,6 +36,10 @@ class AudioPlayerService {
    * @param url The URL of the audio to play
    * @returns A promise that resolves when the audio starts playing
    */
+  async playAudio(url: string): Promise<void> {
+    return this.playFromUrl(url);
+  }
+
   /**
    * Play audio from a given URL
    * @param url The URL of the audio to play

@@ -1,8 +1,9 @@
 # app.py
 # Make sure to install these dependencies before running:
-!pip install transformers langchain-huggingface kaleido==0.2.1 torch torchaudio langchain_community bitsandbytes autoawq accelerate sentencepiece protobuf pulp scipy plotly==5.24.1 reportlab gtts pytrends faiss-cpu pydub
+# Required packages:
+!pip install transformers langchain-huggingface kaleido==0.2.1 torch torchaudio langchain_community bitsandbytes autoawq accelerate sentencepiece protobuf pulp scipy plotly==5.24.1 reportlab gtts pytrends faiss-cpu pydub==0.25.1 soundfile==0.12.1 ffmpeg-python==0.2.0
 !pip install kaleido==0.2.1 plotly==5.24.1
-!pip install flask-cors
+!pip install flask-cors Flask-CORS==4.0.0
 
 # Import Colab configuration
 from colab_config import setup_colab_environment, optimize_model_loading
@@ -36,6 +37,9 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 from io import BytesIO
 import base64
+import time
+import traceback
+import subprocess
 from datetime import datetime, timedelta
 import pytrends.request
 from pytrends.request import TrendReq
@@ -48,6 +52,8 @@ import pulp
 from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM, BitsAndBytesConfig
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
 import torchaudio
+import soundfile as sf
+from pydub import AudioSegment
 from gtts import gTTS
 from langchain.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -58,6 +64,7 @@ import json
 import tempfile
 import subprocess
 import threading
+import traceback
 import socket
 import time
 import platform
@@ -70,7 +77,7 @@ app = Flask(__name__)
 CORS(app) 
 
 # Configuration
-os.environ["HF_TOKEN"] = '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'
+os.environ["HF_TOKEN"] = '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'
 MODEL_NAME = "mistralai/Mistral-7B-v0.1"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 WHISPER_MODEL = "openai/whisper-base"
@@ -83,8 +90,15 @@ AUDIO_PATH = "audio"
 
 # Ensure directories exist
 for path in [VECTOR_DB_PATH, REPORT_PATH, AUDIO_PATH]:
-    if not os.path.exists(path):
-        os.makedirs(path)
+    try:
+        if not os.path.exists(path):
+            print(f"Creating directory: {path}")
+            os.makedirs(path)
+        else:
+            print(f"Directory already exists: {path}")
+    except Exception as dir_error:
+        print(f"Error creating directory {path}: {dir_error}")
+        # Try to continue anyway
 
 # Initialize language model with optimizations
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -119,40 +133,201 @@ llm_pipeline = pipeline(
 # Clean memory again after pipeline setup
 clean_memory()
 
-# Initialize Whisper for speech recognition
-try:
-    whisper_processor = WhisperProcessor.from_pretrained(WHISPER_MODEL)
-    whisper_model = WhisperForConditionalGeneration.from_pretrained(WHISPER_MODEL)
-    whisper_model.to("cuda" if torch.cuda.is_available() else "cpu")
-    
-    def transcribe_audio(audio_file, target_language="en"):
-        """Transcribe audio file using Whisper"""
-        # Load audio
-        audio_array, sampling_rate = torchaudio.load(audio_file)
-        # Convert to mono if stereo
-        if audio_array.shape[0] > 1:
-            audio_array = torch.mean(audio_array, dim=0, keepdim=True)
+# Initialize Whisper for speech recognition - force CPU to avoid device mismatch errors
+whisper_processor = None
+whisper_model = None
+
+# Force using CPU for Whisper regardless of CUDA availability
+device = "cpu"
+
+# Define the transcribe_audio function at global scope so it's accessible everywhere
+def transcribe_audio(audio_file, target_language="en"):
+    """Transcribe audio file using Whisper with robust error handling and format conversion"""
+    try:
+        import os
+        import subprocess
+        from pydub import AudioSegment
+        import soundfile as sf
+        import numpy as np
+        import torch
+        import torchaudio
         
-        # Resample if needed
-        if sampling_rate != 16000:
-            resampler = torchaudio.transforms.Resample(sampling_rate, 16000)
-            audio_array = resampler(audio_array)
-            sampling_rate = 16000
+        # First, check if file exists
+        if not os.path.exists(audio_file):
+            print(f"Audio file does not exist: {audio_file}")
+            return "Error: Audio file not found"
+        
+        # Get file info
+        file_size = os.path.getsize(audio_file)
+        print(f"Processing audio file: {audio_file} (Size: {file_size} bytes)")
+        
+        if file_size == 0:
+            print("Empty audio file received")
+            return "Error: Empty audio file"
+            
+        # IMPROVED CONVERSION APPROACH: Always convert with pydub first to ensure compatibility
+        print("Converting audio to 16kHz mono PCM WAV for Whisper...")
+        temp_wav_path = f"{os.path.splitext(audio_file)[0]}_whisper_compatible.wav"
+        
+        try:
+            # Use pydub to convert the file to a format that torchaudio can definitely read
+            audio = AudioSegment.from_file(audio_file)
+            # Convert to mono and 16kHz
+            audio = audio.set_channels(1)
+            audio = audio.set_frame_rate(16000)
+            # Export with format that Whisper expects
+            audio.export(temp_wav_path, format="wav", parameters=["-acodec", "pcm_s16le"])
+            print(f"Successfully converted to Whisper-compatible WAV: {temp_wav_path}")
+            
+            # Verify file was created properly
+            if os.path.exists(temp_wav_path) and os.path.getsize(temp_wav_path) > 0:
+                audio_file = temp_wav_path
+            else:
+                print("WARNING: Converted file is empty, will try alternate methods")
+        except Exception as pydub_error:
+            print(f"Pydub conversion failed: {pydub_error}")
+            # Try with ffmpeg directly as fallback
+            try:
+                print("Attempting direct ffmpeg conversion...")
+                command = f"ffmpeg -y -i \"{audio_file}\" -ac 1 -ar 16000 -c:a pcm_s16le \"{temp_wav_path}\""
+                subprocess.run(command, shell=True, check=True, stderr=subprocess.PIPE)
+                if os.path.exists(temp_wav_path) and os.path.getsize(temp_wav_path) > 0:
+                    print(f"FFmpeg conversion successful: {temp_wav_path}")
+                    audio_file = temp_wav_path
+                else:
+                    print("FFmpeg created an empty file")
+            except Exception as ffmpeg_error:
+                print(f"FFmpeg conversion failed: {ffmpeg_error}")
+        
+        # Check if whisper_model and processor are available
+        global whisper_model, whisper_processor
+        if whisper_model is None or whisper_processor is None:
+            return "Speech recognition model is not initialized. Please try again later."
+            
+        # Try loading with soundfile first (better for WAV files)
+        audio_array = None
+        try:
+            print("Attempting to load with soundfile...")
+            audio_data, sample_rate = sf.read(audio_file)
+            print(f"Loaded audio with soundfile: shape={audio_data.shape}, sr={sample_rate}")
+            
+            # Convert numpy array to torch tensor
+            if isinstance(audio_data, np.ndarray):
+                audio_array = torch.from_numpy(audio_data.copy()).float()  # Use copy to ensure memory contiguity
+            
+            # Handle dimensionality
+            if audio_array is not None and audio_array.ndim == 1:
+                # Mono audio, add channel dimension [1, length]
+                audio_array = audio_array.unsqueeze(0) if hasattr(audio_array, 'unsqueeze') else audio_array.reshape(1, -1)
+            else:
+                # Multi-channel audio, convert to mono [1, length]
+                audio_array = audio_array.mean(axis=0, keepdim=True) if hasattr(audio_array, 'mean') else torch.mean(audio_array, dim=0, keepdim=True)
+            
+            sampling_rate = sample_rate
+        except Exception as sf_error:
+            print(f"Soundfile loading failed: {sf_error}")
+            return "Error processing audio: Could not load the audio file"
+        
+        # Ensure we have mono audio
+        if audio_array.ndim > 1 and audio_array.shape[0] > 1:
+            audio_array = torch.mean(audio_array, dim=0, keepdim=True)
+            
+        # Print some diagnostic info
+        print(f"Final audio tensor shape: {audio_array.shape}, dtype: {audio_array.dtype}, sampling rate: {sampling_rate}")
         
         # Process audio with Whisper
-        input_features = whisper_processor(audio_array.squeeze().numpy(), sampling_rate=16000, return_tensors="pt").input_features
-        forced_decoder_ids = whisper_processor.get_decoder_prompt_ids(language=target_language, task="transcribe")
-        
-        # Generate transcription
-        predicted_ids = whisper_model.generate(input_features, forced_decoder_ids=forced_decoder_ids)
-        transcription = whisper_processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
-        
-        return transcription
+        print("Processing with Whisper model...")
+        try:
+            # Handle different audio array types - check if it's already numpy or if it's torch
+            if hasattr(audio_array, 'numpy'):
+                # It's a torch tensor, convert to numpy
+                audio_numpy = audio_array.squeeze().numpy()
+            else:
+                # It's already a numpy array
+                audio_numpy = audio_array.squeeze()
+            
+            # Normalize audio if needed (important for Whisper)
+            if np.abs(audio_numpy).max() > 0.0:  # Avoid division by zero
+                print("Normalizing audio...")
+                audio_numpy = audio_numpy / np.abs(audio_numpy).max()
+            
+            # Force to CPU for consistency
+            whisper_model.to('cpu')
+            
+            # Process with Whisper
+            print("Processing audio with Whisper processor...")
+            input_features = whisper_processor(audio_numpy, sampling_rate=16000, return_tensors="pt").input_features
+            input_features = input_features.to('cpu')
+            
+            # Handle auto language detection
+            if target_language == "auto":
+                print("Auto language detection enabled")
+                forced_decoder_ids = None  # Let Whisper detect the language
+            else:
+                print(f"Using specified language: {target_language}")
+                forced_decoder_ids = whisper_processor.get_decoder_prompt_ids(language=target_language, task="transcribe")
+            
+            # Run inference
+            print("Running inference...")
+            with torch.no_grad():
+                predicted_ids = whisper_model.generate(
+                    input_features,
+                    forced_decoder_ids=forced_decoder_ids,
+                    max_length=256
+                )
+            
+            # Decode the output
+            transcription = whisper_processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+            print(f"Transcription successful: {transcription[:50]}...")
+            return transcription
+        except Exception as whisper_error:
+            print(f"Whisper processing error: {whisper_error}")
+            import traceback
+            traceback.print_exc()
+            return f"Error processing audio with Whisper: {str(whisper_error)}"
+    except Exception as e:
+        print(f"Transcription failed with error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return f"Error transcribing audio: {str(e)}"
+
+try:
+    print(f"Loading Whisper model: {WHISPER_MODEL}")
+    whisper_processor = WhisperProcessor.from_pretrained(WHISPER_MODEL, local_files_only=False)
+    
+    # Check if CUDA is available and has enough memory
+    use_cuda = False
+    if torch.cuda.is_available():
+        try:
+            # Check available GPU memory
+            total_memory = torch.cuda.get_device_properties(0).total_memory
+            allocated_memory = torch.cuda.memory_allocated(0)
+            free_memory = total_memory - allocated_memory
+            # Only use CUDA if at least 1GB is free
+            if free_memory > 1024 * 1024 * 1024:  # 1GB in bytes
+                use_cuda = True
+        except Exception as cuda_error:
+            print(f"Error checking CUDA memory: {cuda_error}")
+            use_cuda = False
+    
+    device = "cuda" if use_cuda else "cpu"
+    print(f"Selected device for Whisper model: {device}")
+    
+    # Load model on the appropriate device
+    whisper_model = WhisperForConditionalGeneration.from_pretrained(WHISPER_MODEL, local_files_only=False)
+    whisper_model.to(device)
+    print("Whisper model initialized successfully on device:", device)
+except Exception as whisper_init_error:
+    print(f"Error initializing Whisper model: {whisper_init_error}")
+    # Create fallback dummy_transcribe function that will return error messages if Whisper fails to load
+    def dummy_transcribe(audio_file, target_language="en"):
+        return "Speech recognition is currently unavailable. Please try again later."
+    
+    # Override transcribe_audio to use dummy_transcribe if Whisper model failed to load
+    # This ensures that the upload_audio endpoint still works even if Whisper fails
+    transcribe_audio = dummy_transcribe
 except Exception as e:
     print(f"Whisper initialization failed: {e}. Speech recognition will not be available.")
-    
-    def transcribe_audio(audio_file, target_language="en"):
-        return f"Speech recognition unavailable. Error: {str(e)}"
 
 # Text-to-Speech function using gTTS
 def generate_speech(text, language="en"):
@@ -204,8 +379,9 @@ def generate_speech(text, language="en"):
                 # Use slow=False for normal speed, but can be adjusted for clarity if needed
                 tts = gTTS(text=text, lang=lang, slow=False)
                 
-                # Add exponential backoff retry mechanism for network issues
+                # Add linear backoff retry mechanism for network issues
                 max_retries = 3
+                retry_delay = 1
                 for attempt in range(max_retries):
                     try:
                         tts.save(filename)
@@ -213,7 +389,7 @@ def generate_speech(text, language="en"):
                         break
                     except Exception as retry_error:
                         if attempt < max_retries - 1:
-                            retry_delay = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                            retry_delay +=1    # linear backoff: 1s, 2s, 3s
                             print(f"Retrying TTS save after {retry_delay}s delay. Error: {retry_error}")
                             time.sleep(retry_delay)
                         else:
@@ -525,6 +701,7 @@ def merge_data_for_modeling():
     
     return merged_data
 
+
 merged_data = merge_data_for_modeling()
 
 # Sample supply chain documents for RAG
@@ -636,7 +813,7 @@ class ForecastingEngine:
             prophet_data[f'{product_id}_trend'] = product_data[product_id]
         
         # Create and train Prophet model
-        model = Prophet(yearly_seasonality=True, weekly_seasonality=True, daily_seasonality=False)
+        model = Prophet(yearly_seasonality=True, monthly_seasonality=True, weekly_seasonality=True, daily_seasonality=False)
         
         # Add regressors
         for regressor in regressors:
@@ -1827,9 +2004,8 @@ def generate_response(query, context="", language="en"):
         10. Use contractions (don't, I'll, we're) to sound more natural in speech
         11. If uncertain, acknowledge the limitations rather than providing incorrect information
         12. Round numbers and statistics for easier comprehension in audio
-        13. Do not use URLs, email addresses, or file paths
-        14. Do not refer to yourself as an AI, language model, or assistant
-        15. Speak as if you are having a direct conversation with the person
+        13. Do not refer to yourself as an AI, language model, or assistant
+        14. Speak as if you are having a direct conversation with the person
         
         [ASSISTANT RESPONSE]
         """
@@ -2729,15 +2905,180 @@ def ask_question_with_tts():
                     "total_time": (datetime.now() - start_time).total_seconds()
                 }
             }), 500
-            
-    except Exception as e:
-        print(f"Error with ask_tts request: {str(e)}")
-        return jsonify({"error": f"Request error: {str(e)}"}), 400
-
+        
+    finally:
+        # This finally block closes the try block that was opened above
+        pass
 
 @app.route('/upload_audio', methods=['POST'])
 def upload_audio():
-    """Process uploaded audio for speech recognition"""
+    """Process uploaded audio for speech recognition and return AI response"""
+    print("Received audio upload request")
+    if 'audio' not in request.files:
+        print("No audio file in request")
+        return jsonify({"error": "No audio file provided"}), 400
+    
+    audio_file = request.files['audio']
+    language = request.form.get('language', 'en')
+    generate_speech_param = request.form.get('generate_speech', 'true').lower()
+    generate_speech_bool = generate_speech_param in ['true', '1', 'yes']
+    
+    print(f"Audio file: {audio_file.filename}, Language: {language}")
+    
+    if audio_file.filename == '':
+        print("Empty filename received")
+        return jsonify({"error": "Empty audio file"}), 400
+        
+    # Check request content before saving
+    if hasattr(audio_file, 'content_length') and audio_file.content_length == 0:
+        print("Content length is zero")
+        return jsonify({"error": "Empty audio file was uploaded (0 bytes)"}), 400
+    
+    temp_paths = []  # Keep track of all temporary files
+    try:
+        # Determine appropriate file extension based on content type or filename
+        file_ext = "wav"  # Default
+        content_type = audio_file.content_type.lower() if audio_file.content_type else ""
+        original_filename = audio_file.filename.lower() if audio_file.filename else ""
+        
+        # Try to determine format from content type first
+        if content_type:
+            if "mp3" in content_type:
+                file_ext = "mp3"
+            elif "m4a" in content_type or "aac" in content_type:
+                file_ext = "m4a"
+            elif "ogg" in content_type or "opus" in content_type:
+                file_ext = "ogg"
+            elif "wav" in content_type or "audio/wave" in content_type:
+                file_ext = "wav"
+            print(f"Detected content type: {content_type}, using extension: {file_ext}")
+        # If content type didn't work, try filename
+        elif original_filename and "." in original_filename:
+            detected_ext = original_filename.split(".")[-1].lower()
+            if detected_ext in ["mp3", "wav", "m4a", "aac", "ogg", "opus"]:
+                file_ext = detected_ext
+                print(f"Using extension from filename: {file_ext}")
+        
+        # Make sure audio directory exists
+        os.makedirs(AUDIO_PATH, exist_ok=True)
+        
+        # Save audio file with appropriate extension
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        temp_path = f"{AUDIO_PATH}/temp_{timestamp}.{file_ext}"
+        temp_paths.append(temp_path)  # Add to list of files to clean up
+        
+        print(f"Saving uploaded file to: {temp_path}")
+        try:
+            # Read the entire file into memory first to validate it's not empty
+            audio_data = audio_file.read()
+            if not audio_data or len(audio_data) == 0:
+                return jsonify({"error": "Empty audio file was uploaded (0 bytes)"}), 400
+            
+            # Write the file to disk
+            with open(temp_path, 'wb') as f:
+                f.write(audio_data)
+            
+            # Reset file pointer for potential future use
+            audio_file.seek(0)
+            
+            # Check if file was saved correctly
+            if not os.path.exists(temp_path):
+                return jsonify({"error": "Failed to save audio file"}), 500
+                
+            file_size = os.path.getsize(temp_path)
+            print(f"File saved successfully. Size: {file_size} bytes")
+            if file_size == 0:
+                return jsonify({"error": "Empty audio file was uploaded (0 bytes)"}), 400
+        except Exception as save_error:
+            print(f"Error saving audio file: {save_error}")
+            return jsonify({"error": f"Failed to save audio file: {str(save_error)}"}), 500
+        
+        # If the file isn't already WAV, try to convert it to ensure compatibility
+        if file_ext != "wav":
+            try:
+                wav_path = f"{AUDIO_PATH}/temp_{timestamp}_converted.wav"
+                temp_paths.append(wav_path)  # Add to cleanup list
+                
+                print(f"Converting {file_ext} to WAV format...")
+                # Convert using pydub
+                audio = AudioSegment.from_file(temp_path)
+                audio = audio.set_channels(1)  # Convert to mono
+                audio = audio.set_frame_rate(16000)  # Set to 16kHz
+                audio.export(wav_path, format="wav")
+                
+                # Use the converted file if successful
+                if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
+                    print(f"Conversion successful, using: {wav_path}")
+                    temp_path = wav_path
+                else:
+                    print("Conversion produced empty file, using original")
+            except Exception as conv_err:
+                print(f"Conversion error (will use original file): {conv_err}")
+                # Continue with original file if conversion fails
+        
+        # Transcribe audio
+        print(f"Starting transcription of {temp_path}")
+        transcription = transcribe_audio(temp_path, language)
+        
+        if not transcription or transcription.strip() == "":
+            return jsonify({
+                "status": "error",
+                "error": "Could not transcribe audio. Please try again with a clearer recording."
+            }), 400
+        
+        # Process the query using the transcription
+        context = get_rag_context(transcription)
+        response = generate_response(transcription, context, language)
+        
+        # Auto-detect language from the response if it was set to "auto"
+        detected_language = language
+        if language == "auto":
+            # Basic language detection based on response
+            if any(char in response for char in "éèêëàâîïôùûç"):
+                detected_language = "fr"
+            elif any("\u0600" <= char <= "\u06FF" for char in response):
+                detected_language = "ar"
+            else:
+                detected_language = "en"
+        
+        # Generate speech if requested
+        speech_url = None
+        if generate_speech_bool:
+            try:
+                speech_file = generate_speech(response, detected_language)
+                if speech_file:
+                    speech_url = f"/audio/{os.path.basename(speech_file)}"
+            except Exception as speech_error:
+                print(f"Error generating speech: {speech_error}")
+                # Continue processing even if speech generation fails
+            
+        result = {
+            "status": "success",
+            "transcription": transcription,
+            "response": response,
+            "language_detected": detected_language,
+            "speech_url": speech_url
+        }
+
+        return jsonify(result)
+    except Exception as e:
+        error_msg = f"Error processing audio: {str(e)}"
+        print(error_msg)
+        traceback.print_exc()
+        return jsonify({"status": "error", "error": error_msg}), 500
+    finally:
+        # Clean up all temp files
+        for path in temp_paths:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                    print(f"Cleaned up temporary file: {path}")
+                except Exception as cleanup_err:
+                    print(f"Error removing temp audio file {path}: {cleanup_err}")
+
+@app.route('/transcribe_audio', methods=['POST'])
+def transcribe_audio_route():
+    """Transcribe audio file to text without generating a response"""
     if 'audio' not in request.files:
         return jsonify({"error": "No audio file provided"}), 400
     
@@ -2747,36 +3088,89 @@ def upload_audio():
     if audio_file.filename == '':
         return jsonify({"error": "Empty audio file"}), 400
     
+    temp_paths = []  # Track all temporary files
     try:
-        # Save audio file temporarily
-        temp_path = f"{AUDIO_PATH}/temp_{datetime.now().strftime('%Y%m%d%H%M%S')}.wav"
+        # Determine appropriate file extension based on content type or filename
+        file_ext = "wav"  # Default
+        content_type = audio_file.content_type.lower() if audio_file.content_type else ""
+        original_filename = audio_file.filename.lower() if audio_file.filename else ""
+        
+        if content_type:
+            if "mp3" in content_type:
+                file_ext = "mp3"
+            elif "m4a" in content_type or "aac" in content_type:
+                file_ext = "m4a"
+            elif "ogg" in content_type or "opus" in content_type:
+                file_ext = "ogg"
+            elif "wav" in content_type or "audio/wave" in content_type:
+                file_ext = "wav"
+            print(f"Detected content type: {content_type}, using extension: {file_ext}")
+        elif original_filename and "." in original_filename:
+            detected_ext = original_filename.split(".")[-1].lower()
+            if detected_ext in ["mp3", "wav", "m4a", "aac", "ogg", "opus"]:
+                file_ext = detected_ext
+                print(f"Using extension from filename: {file_ext}")
+        
+        # Save audio file with appropriate extension
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        temp_path = f"{AUDIO_PATH}/temp_{timestamp}.{file_ext}"
+        temp_paths.append(temp_path)
+        
+        print(f"Saving uploaded file to: {temp_path}")
         audio_file.save(temp_path)
         
+        if not os.path.exists(temp_path):
+            return jsonify({"error": "Failed to save audio file"}), 500
+            
+        file_size = os.path.getsize(temp_path)
+        print(f"File saved successfully. Size: {file_size} bytes")
+        if file_size == 0:
+            return jsonify({"error": "Empty audio file was uploaded (0 bytes)"}), 400
+        
+        # If the file isn't already WAV, try to convert it to ensure compatibility
+        if file_ext != "wav":
+            try:
+                wav_path = f"{AUDIO_PATH}/temp_{timestamp}_converted.wav"
+                temp_paths.append(wav_path)
+                
+                print(f"Converting {file_ext} to WAV format...")
+                audio = AudioSegment.from_file(temp_path)
+                audio = audio.set_channels(1)  # Convert to mono
+                audio = audio.set_frame_rate(16000)  # Set to 16kHz
+                audio.export(wav_path, format="wav")
+                
+                if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
+                    print(f"Conversion successful, using: {wav_path}")
+                    temp_path = wav_path
+                else:
+                    print("Conversion produced empty file, using original")
+            except Exception as conv_err:
+                print(f"Conversion error (will use original file): {conv_err}")
+        
         # Transcribe audio
+        print(f"Starting transcription of {temp_path}")
         transcription = transcribe_audio(temp_path, language)
         
-        # Process the query
-        if transcription:
-            context = get_rag_context(transcription)
-            response = generate_response(transcription, context, language)
-            
-            # Generate speech response
-            speech_file = generate_speech(response, language)
-            
-            return jsonify({
-                "transcription": transcription,
-                "response": response,
-                "speech_url": f"/audio/{os.path.basename(speech_file)}" if speech_file else None
-            })
-        else:
-            return jsonify({"error": "Could not transcribe audio"}), 500
+        return jsonify({
+            "status": "success",
+            "transcription": transcription,
+            "language_detected": language
+        })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        error_msg = f"Error transcribing audio: {str(e)}"
+        print(error_msg)
+        traceback.print_exc()
+        return jsonify({"status": "error", "error": error_msg}), 500
     finally:
-        # Clean up temp file
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        # Clean up all temp files
+        for path in temp_paths:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                    print(f"Cleaned up temporary file: {path}")
+                except Exception as cleanup_err:
+                    print(f"Error removing temp file {path}: {cleanup_err}")
 
 @app.route('/add_document', methods=['POST'])
 def add_document():
