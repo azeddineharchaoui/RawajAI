@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, ScrollView, ActivityIndicator, Text, TextInput } from 'react-native';
-import { Stack } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { Platform } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
@@ -13,6 +12,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useForm, Controller } from "react-hook-form"
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
+import MetricItem from '@/components/forcast/MetricItem';
 
 interface ForecastResult {
   chart_data?: any;
@@ -29,7 +29,7 @@ export default function ForecastScreen() {
 
   const [productId, setProductId] = useState('');
   const [loading, setLoading] = useState(false);
-  const [forecastData, setForecastData] = useState<ForecastResult | null>(null);
+  const [forecastData, setForecastData] = useState<ForecastResult | null>();
   const [error, setError] = useState<any>('');
   const [plotHtml, setPlotHtml] = useState('');
 
@@ -71,7 +71,7 @@ export default function ForecastScreen() {
         days: days,
       });
       console.log(response);
-      
+
 
       setForecastData(response);
       // If we have chart data, create a simple plot
@@ -271,7 +271,23 @@ export default function ForecastScreen() {
                 </View>
               )}
 
-              <Button onPress={() => console.log('Generate report for:', productId)}>
+              <Button
+                style={{
+                  marginTop: 16,
+                  backgroundColor: colorScheme === 'dark' ? '#3B82F6' : '#2563EB', // adjust as needed
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: colorScheme === 'dark' ? '#1E40AF' : '#60A5FA',
+                }}
+                textStyle={{
+                  color: colorScheme === 'dark' ? '#ffffff' : '#f0f9ff',
+                  fontWeight: '600',
+                  fontSize: 16,
+                }}
+
+                onPress={() => console.log('Generate report for:', productId)}>
                 Generate PDF Report
               </Button>
             </Card>
@@ -281,13 +297,6 @@ export default function ForecastScreen() {
     </ThemedView>
   );
 }
-
-const MetricItem = ({ label, value }: { label: string; value: string | number }) => (
-  <View style={styles.metricItem}>
-    <ThemedText style={styles.metricLabel}>{label}</ThemedText>
-    <ThemedText style={styles.metricValue}>{value}</ThemedText>
-  </View>
-);
 
 const styles = StyleSheet.create({
   inputStyle: {
