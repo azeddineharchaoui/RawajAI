@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Stack } from 'expo-router';
 
@@ -14,6 +14,20 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { WebView } from 'react-native-webview';
 
+interface Product {
+  product_id: string;
+  category: string;
+  total_inventory: number;
+  avg_cost: number;
+  inventory_by_location: Record<string, number>;
+  avg_lead_time: number;
+}
+
+interface ProductsResponse {
+  products: Product[];
+  total_count: number;
+}
+
 export default function InventoryScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -24,6 +38,8 @@ export default function InventoryScreen() {
   const [leadTime, setLeadTime] = useState('7');
   const [serviceLevel, setServiceLevel] = useState('0.95');
   const [loading, setLoading] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [productsLoading, setProductsLoading] = useState(false);
   interface OptimizationResult {
     eoq?: number;
     reorder_point?: number;
@@ -35,6 +51,34 @@ export default function InventoryScreen() {
   const [error, setError] = useState('');
   const [plotHtml, setPlotHtml] = useState('');
   const [activeTab, setActiveTab] = useState('optimize'); // 'optimize' or 'view'
+  
+  // Fetch products from API when the component mounts
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+  
+  // Reload products when the tab changes to 'view'
+  useEffect(() => {
+    if (activeTab === 'view') {
+      fetchProducts();
+    }
+  }, [activeTab]);
+  
+  // Function to fetch products from the API
+  const fetchProducts = async () => {
+    try {
+      setProductsLoading(true);
+      const response = await api.getProducts() as ProductsResponse;
+      if (response && response.products) {
+        setProducts(response.products);
+      }
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      setError('Failed to fetch products. Please try again.');
+    } finally {
+      setProductsLoading(false);
+    }
+  };
 
   const optimizeInventory = async () => {
     if (!productId) {
@@ -135,13 +179,43 @@ export default function InventoryScreen() {
   const renderOptimizeContent = () => (
     <>
       <Card style={styles.formCard}>
-        <Input
-          label="Product ID"
-          placeholder="Enter product ID"
-          value={productId}
-          onChangeText={setProductId}
-          containerStyle={styles.input}
-        />
+        <View style={styles.input}>
+          <ThemedText style={{marginBottom: 8, fontWeight: '500'}}>Product ID</ThemedText>
+          <View style={styles.selectContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {products.length > 0 ? (
+                products.map((product) => (
+                  <TouchableOpacity
+                    key={product.product_id}
+                    style={[
+                      styles.productButton,
+                      productId === product.product_id && styles.selectedProduct
+                    ]}
+                    onPress={() => {
+                      setProductId(product.product_id);
+                      // Also set the lead time from the product data
+                      setLeadTime(product.avg_lead_time.toString());
+                    }}
+                  >
+                    <ThemedText style={[
+                      styles.productButtonText,
+                      productId === product.product_id && styles.selectedProductText
+                    ]}>
+                      {product.product_id}
+                    </ThemedText>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <Input
+                  placeholder="Enter product ID"
+                  value={productId}
+                  onChangeText={setProductId}
+                  containerStyle={{flex: 1}}
+                />
+              )}
+            </ScrollView>
+          </View>
+        </View>
         
         <View style={styles.rowInputs}>
           <View style={styles.halfInput}>
@@ -262,43 +336,45 @@ export default function InventoryScreen() {
     <Card style={styles.inventoryCard}>
       <ThemedText type="subtitle">Current Inventory</ThemedText>
       
-      {loading ? (
+      {productsLoading ? (
         <ActivityIndicator size="large" color={colors.tint} style={styles.loader} />
       ) : (
         <View style={styles.inventoryList}>
-          {/* This would be populated from an API call to get inventory */}
-          <InventoryItem 
-            id="SKU-1001" 
-            name="Product A" 
-            quantity={256} 
-            status="ok" 
-          />
-          <InventoryItem 
-            id="SKU-1002" 
-            name="Product B" 
-            quantity={42} 
-            status="low" 
-          />
-          <InventoryItem 
-            id="SKU-1003" 
-            name="Product C" 
-            quantity={0} 
-            status="out" 
-          />
-          <InventoryItem 
-            id="SKU-1004" 
-            name="Product D" 
-            quantity={128} 
-            status="ok" 
-          />
-          <InventoryItem 
-            id="SKU-1005" 
-            name="Product E" 
-            quantity={18} 
-            status="low" 
-          />
+          {products.length > 0 ? (
+            products.map((product) => {
+              // Determine the status based on inventory level
+              let status: 'ok' | 'low' | 'out' = 'ok';
+              if (product.total_inventory <= 0) {
+                status = 'out';
+              } else if (product.total_inventory < 100) { // Assuming less than 100 is "low"
+                status = 'low';
+              }
+              
+              return (
+                <InventoryItem 
+                  key={product.product_id}
+                  id={product.product_id}
+                  name={`${product.product_id.charAt(0).toUpperCase() + product.product_id.slice(1)}`}
+                  quantity={product.total_inventory}
+                  status={status}
+                  category={product.category}
+                />
+              );
+            })
+          ) : error ? (
+            <ThemedText style={styles.errorText}>{error}</ThemedText>
+          ) : (
+            <ThemedText style={{textAlign: 'center', marginVertical: 20, opacity: 0.6}}>No products found</ThemedText>
+          )}
         </View>
       )}
+      
+      <Button
+        text="Refresh Products"
+        onPress={fetchProducts}
+        fullWidth
+        style={{ marginTop: 16 }}
+      />
     </Card>
   );
 
@@ -318,11 +394,12 @@ export default function InventoryScreen() {
 }
 
 // Inventory Item Component
-const InventoryItem = ({ id, name, quantity, status }: { 
+const InventoryItem = ({ id, name, quantity, status, category }: { 
   id: string;
   name: string;
   quantity: number;
   status: 'ok' | 'low' | 'out';
+  category?: string;
 }) => {
   const statusColors = {
     ok: '#38A169', // green
@@ -347,6 +424,7 @@ const InventoryItem = ({ id, name, quantity, status }: {
       <View style={styles.itemContent}>
         <ThemedText style={styles.itemName}>{name}</ThemedText>
         <ThemedText style={styles.itemId}>{id}</ThemedText>
+        {category && <ThemedText style={styles.itemCategory}>{category}</ThemedText>}
       </View>
       <View style={styles.itemContent}>
         <ThemedText style={styles.itemQuantity}>{quantity}</ThemedText>
@@ -490,5 +568,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+  },
+  noDataText: {
+    textAlign: 'center',
+    marginVertical: 20,
+    opacity: 0.6,
+  },
+  itemCategory: {
+    fontSize: 12,
+    opacity: 0.6,
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
+  selectContainer: {
+    flexDirection: 'row',
+    marginBottom: 10,
+  },
+  productButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    marginRight: 8,
+    backgroundColor: 'rgba(150,150,150,0.1)',
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  selectedProduct: {
+    backgroundColor: Colors.light.tint + '20',
+    borderColor: Colors.light.tint,
+  },
+  productButtonText: {
+    fontSize: 14,
+  },
+  selectedProductText: {
+    color: Colors.light.tint,
+    fontWeight: 'bold',
   },
 });

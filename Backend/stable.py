@@ -87,7 +87,7 @@ app = Flask(__name__)
 CORS(app) 
 
 # Configuration
-os.environ["HF_TOKEN"] = ''
+os.environ["HF_TOKEN"] = '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'
 MODEL_NAME = "mistralai/Mistral-7B-v0.1"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 WHISPER_MODEL = "openai/whisper-medium"
@@ -3729,6 +3729,66 @@ def list_documents():
         print(f"Error listing documents: {e}")
         traceback.print_exc()
         return jsonify({"status": "error", "message": str(e)}), 500
+        
+@app.route('/products', methods=['GET'])
+def get_products():
+    """Get the list of all products with their current inventory levels and categories"""
+    try:
+        # Get unique products from supply chain data
+        unique_products = supply_chain_data['product_id'].unique()
+        
+        # Prepare response with product details
+        product_list = []
+        
+        for product_id in unique_products:
+            # Filter data for this product
+            product_data = supply_chain_data[supply_chain_data['product_id'] == product_id]
+            
+            # Calculate total current inventory across all locations
+            total_inventory = product_data['inventory'].sum()
+            
+            # Determine product category based on product name
+            if 'PHN' in product_id:
+                category = 'Electronics - Phones'
+            elif 'LAP' in product_id:
+                category = 'Electronics - Computers'
+            elif 'TAB' in product_id:
+                category = 'Electronics - Tablets'
+            elif 'CPU' in product_id:
+                category = 'Processors'
+            elif 'GPU' in product_id:
+                category = 'Graphics Cards'
+            else:
+                category = 'Other Electronics'
+            
+            # Get average cost
+            avg_cost = product_data['cost'].mean()
+            
+            # Get inventory by location
+            inventory_by_location = {}
+            for location in product_data['location'].unique():
+                location_data = product_data[product_data['location'] == location]
+                inventory_by_location[location] = int(location_data['inventory'].sum())
+            
+            # Add product to list
+            product_list.append({
+                'product_id': product_id,
+                'category': category,
+                'total_inventory': int(total_inventory),
+                'avg_cost': round(float(avg_cost), 2),
+                'inventory_by_location': inventory_by_location,
+                'avg_lead_time': round(float(product_data['lead_time'].mean()), 1)
+            })
+        
+        return jsonify({
+            'products': product_list,
+            'total_count': len(product_list)
+        })
+    except Exception as e:
+        print(f"Error in /products endpoint: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 def save_document_metadata(metadata):
     """Save document metadata to the index file"""
