@@ -3560,7 +3560,7 @@ if __name__ == '__main__':
         print("You can start it manually later via the /tunnel/start endpoint")
     
     print("\n=== Starting Supply Chain AI Agent Server ===")
-    print("Web interface will be available at http://localhost:5000")
+    print("Web interface will be available at http://192.168.1.15:5000")
     print("Multi-lingual support: English, French, Arabic")
     print("Features: Demand forecasting, Inventory optimization, Anomaly detection, Scenario analysis")
     print("Press Ctrl+C to stop the server and tunnel")

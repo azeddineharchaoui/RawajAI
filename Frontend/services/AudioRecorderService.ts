@@ -6,7 +6,7 @@ import { api } from '@/services/api';
 import { getTunnelUrl } from '@/services/api';
 
 // Import the same DEFAULT_API_URL from api.ts to ensure consistency
-const DEFAULT_API_URL = 'https://curves-apr-suffer-conduct.trycloudflare.com';
+const DEFAULT_API_URL = 'https://shorter-crest-oklahoma-costa.trycloudflare.com';
 const API_URL = Constants.expoConfig?.extra?.apiUrl || DEFAULT_API_URL;
 
 // Base URL helper function that uses the same logic as api.ts
@@ -64,15 +64,14 @@ class AudioRecorderService {
   /**
    * Initialize audio mode for recording
    */
-  private async initializeAudio(): Promise<void> {
-    try {
-      // Request audio permissions
+ private async initializeAudio(): Promise<void> {
+  try {
+    if (Platform.OS !== 'web') {
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') {
         throw new Error('Audio recording permission not granted');
       }
 
-      // Set audio mode for recording
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
@@ -80,11 +79,14 @@ class AudioRecorderService {
         playThroughEarpieceAndroid: false,
         staysActiveInBackground: false,
       });
-    } catch (error) {
-      console.error('Failed to initialize audio:', error);
-      throw error;
+    } else {
+      console.warn("Audio permissions not required on web.");
     }
+  } catch (error) {
+    console.error('Failed to initialize audio:', error);
+    throw error;
   }
+}
 
   /**
    * Start recording audio
