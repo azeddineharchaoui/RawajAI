@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, ScrollView, ActivityIndicator, Text, TextInput } from 'react-native';
 import { Stack } from 'expo-router';
 import { WebView } from 'react-native-webview';
-
+import { Platform } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Card } from '@/components/ui/Card';
@@ -70,6 +70,8 @@ export default function ForecastScreen() {
         product_id: productId,
         days: days,
       });
+      console.log(response);
+      
 
       setForecastData(response);
       // If we have chart data, create a simple plot
@@ -77,7 +79,7 @@ export default function ForecastScreen() {
         const htmlContent = generatePlotHtml(response.chart_data);
         setPlotHtml(htmlContent);
       }
-    } catch (error:any) {
+    } catch (error: any) {
       console.log('Forecast error:', error);
       setError(error.message || 'An error occurred while generating the forecast');
     } finally {
@@ -124,40 +126,40 @@ export default function ForecastScreen() {
     <ThemedView style={styles.container}>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
-      <View
-        style={{
-          marginVertical: 40,
-          marginHorizontal:20,
-          paddingHorizontal: 20,
-          paddingVertical: 10,
-          backgroundColor: colors ? '#1f2937' : '#f0f4ff',
-          borderRadius: 12,
-          shadowColor: '#000',
-          shadowOpacity: 0.1,
-          shadowOffset: { width: 0, height: 2 },
-          shadowRadius: 5,
-          elevation: 3,
-        }}
-      >
-        <Text
+        <View
           style={{
-            fontSize: 20,
-            fontWeight: '600',
-            color: colors ? '#ffffff' : '#1e3a8a',
+            marginVertical: 40,
+            marginHorizontal: 20,
+            paddingHorizontal: 20,
+            paddingVertical: 10,
+            backgroundColor: colors ? '#1f2937' : '#f0f4ff',
+            borderRadius: 12,
+            shadowColor: '#000',
+            shadowOpacity: 0.1,
+            shadowOffset: { width: 0, height: 2 },
+            shadowRadius: 5,
+            elevation: 3,
           }}
         >
-          📈 Forecast Results
-        </Text>
-        <Text
-          style={{
-            fontSize: 14,
-            color: colors ? '#cbd5e1' : '#475569',
-            marginTop: 4,
-          }}
-        >
-          Predicted trends and performance metrics
-        </Text>
-      </View>
+          <Text
+            style={{
+              fontSize: 20,
+              fontWeight: '600',
+              color: colors ? '#ffffff' : '#1e3a8a',
+            }}
+          >
+            📈 Forecast Results
+          </Text>
+          <Text
+            style={{
+              fontSize: 14,
+              color: colors ? '#cbd5e1' : '#475569',
+              marginTop: 4,
+            }}
+          >
+            Predicted trends and performance metrics
+          </Text>
+        </View>
         <View
           style={{
             flexDirection: 'column',
@@ -221,33 +223,39 @@ export default function ForecastScreen() {
         )}
 
         {forecastData && !loading && (
-          <View style={styles.resultsContainer}>
-            <Card style={styles.chartCard}>
+          <View style={{ marginTop: 20, padding: 10 }}>
+            <Card>
               <ThemedText type="subtitle">Forecast Chart</ThemedText>
 
-              <View style={styles.webViewContainer}>
-                <WebView
-                  source={{ html: plotHtml }}
-                  style={styles.webView}
-                  scrollEnabled={false}
-                  javaScriptEnabled={true}
-                  domStorageEnabled={true}
-                  originWhitelist={['*']}
-                  onError={(e) => console.error('WebView error:', e.nativeEvent)}
-                  renderError={(errorName) => (
-                    <View style={styles.errorContainer}>
-                      <ThemedText style={styles.errorText}>Error loading chart: {errorName}</ThemedText>
-                    </View>
-                  )}
-                />
+              <View style={{ height: 300, marginVertical: 10 }}>
+                {Platform.OS !== 'web' ? (
+                  <WebView
+                    source={{ html: plotHtml }}
+                    style={{ flex: 1 }}
+                    scrollEnabled={false}
+                    javaScriptEnabled={true}
+                    domStorageEnabled={true}
+                    originWhitelist={['*']}
+                    onError={(e) => console.error('WebView error:', e.nativeEvent)}
+                    renderError={(errorName) => (
+                      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+                        <ThemedText style={{ color: 'red' }}>Error loading chart: {errorName}</ThemedText>
+                      </View>
+                    )}
+                  />
+                ) : (
+                  <ThemedText>
+                    Web platform does not support WebView. Chart preview is unavailable on web.
+                  </ThemedText>
+                )}
               </View>
             </Card>
 
-            <Card style={styles.metricsCard}>
+            <Card style={{ marginTop: 20 }}>
               <ThemedText type="subtitle">Forecast Metrics</ThemedText>
 
               {forecastData.metrics && (
-                <View style={styles.metrics}>
+                <View style={{ marginVertical: 10 }}>
                   <MetricItem
                     label="Accuracy"
                     value={`${Math.round((forecastData.metrics?.accuracy || 0) * 100) / 100}%`}
@@ -263,13 +271,7 @@ export default function ForecastScreen() {
                 </View>
               )}
 
-              <Button
-                onPress={() => {
-                  // This would typically open a PDF report
-                  // For now, we'll just log to console
-                  console.log('Generate report for:', productId);
-                }}
-              >
+              <Button onPress={() => console.log('Generate report for:', productId)}>
                 Generate PDF Report
               </Button>
             </Card>
@@ -288,7 +290,7 @@ const MetricItem = ({ label, value }: { label: string; value: string | number })
 );
 
 const styles = StyleSheet.create({
-  inputStyle : {
+  inputStyle: {
     width: '100%',
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -300,7 +302,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
-  labelStyle : {
+  labelStyle: {
     marginTop: 16,
     marginBottom: 6,
     fontSize: 16,
@@ -308,7 +310,7 @@ const styles = StyleSheet.create({
     color: Colors ? '#dde3e7ff' : '#333',
   },
 
-   errorStyle : {
+  errorStyle: {
     color: '#E53E3E',
     fontSize: 13,
     marginTop: 4,

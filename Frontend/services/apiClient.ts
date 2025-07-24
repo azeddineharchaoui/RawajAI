@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 // Default API URL - for local dev testing
-const DEFAULT_API_URL = 'https://kernel-gross-drain-angel.trycloudflare.com';
+const DEFAULT_API_URL = 'https://louis-assuming-grants-designers.trycloudflare.com';
 const API_URL = Constants.expoConfig?.extra?.apiUrl || DEFAULT_API_URL;
 const TUNNEL_KEY = 'tunnel_url'; // Must be a simple string key for SecureStore
 
