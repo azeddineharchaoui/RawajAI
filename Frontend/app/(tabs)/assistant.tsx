@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import React, { useState, useRef, useEffect } from 'react';
 import { StyleSheet, View, FlatList, KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { Stack } from 'expo-router';
@@ -481,30 +482,72 @@ const SuggestionChip = ({ text, onPress }: SuggestionChipProps) => {
   );
 };
 
+=======
+"use client"
+import AuthenticAdvancedAssistant from "../../components/AuthenticAdvancedAssistant"
+import { Platform, StyleSheet } from "react-native"
+
+export default function AssistantScreen() {
+  return <AuthenticAdvancedAssistant />
+}
+
+>>>>>>> oumayma
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: "#f5f7fa",
+  },
+  header: {
+    backgroundColor: "#fff",
+    paddingTop: Platform.OS === "ios" ? 50 : 20,
+    paddingBottom: 15,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e1e8ed",
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#1a202c",
+    textAlign: "center",
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: "#718096",
+    textAlign: "center",
+    marginTop: 4,
   },
   messagesContainer: {
-    padding: 16,
-    paddingBottom: 80,
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
-  messageBubble: {
-    padding: 16,
-    borderRadius: 16,
-    marginVertical: 8,
-    maxWidth: '80%',
+  messageContainer: {
+    marginVertical: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 18,
+    maxWidth: "80%",
   },
-  userBubble: {
-    alignSelf: 'flex-end',
-    borderBottomRightRadius: 4,
+  userMessage: {
+    alignSelf: "flex-end",
+    backgroundColor: "#007AFF",
   },
-  botBubble: {
-    alignSelf: 'flex-start',
-    borderBottomLeftRadius: 4,
+  aiMessage: {
+    alignSelf: "flex-start",
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#e1e8ed",
   },
   messageText: {
     fontSize: 16,
+    lineHeight: 22,
+  },
+  userMessageText: {
+    color: "#fff",
+  },
+  aiMessageText: {
+    color: "#1a202c",
   },
   messageFooter: {
     flexDirection: 'row',
@@ -531,58 +574,13 @@ const styles = StyleSheet.create({
   },
   timestamp: {
     fontSize: 12,
+<<<<<<< HEAD
     opacity: 0.5,
     marginTop: 2,
+=======
+    color: "#718096",
+    marginTop: 4,
+    alignSelf: "flex-end",
+>>>>>>> oumayma
   },
-  inputContainer: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(150,150,150,0.2)',
-    padding: 16,
-    paddingTop: 12,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-  },
-  input: {
-    flex: 1,
-    marginBottom: 0,
-    marginRight: 8,
-  },
-  inputText: {
-    maxHeight: 100,
-  },
-  micButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  micButtonRecording: {
-    transform: [{ scale: 1.1 }],
-  },
-  sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sendButtonDisabled: {
-    opacity: 0.7,
-  },
-  suggestionsContainer: {
-    marginTop: 12,
-  },
-  suggestionChip: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    marginRight: 8,
-  },
-  suggestionText: {
-    fontSize: 14,
-  },
-});
+})
