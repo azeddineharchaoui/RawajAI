@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Stack } from 'expo-router';
 
@@ -11,6 +11,23 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 
 import OptimizeInventorySection from '@/components/Inventory/RenderOptimizeContent';
+import { Input } from '@/components/ui/Input';
+import WebView from 'react-native-webview';
+import { Button } from '@react-navigation/elements';
+
+interface Product {
+  product_id: string;
+  category: string;
+  total_inventory: number;
+  avg_cost: number;
+  inventory_by_location: Record<string, number>;
+  avg_lead_time: number;
+}
+
+interface ProductsResponse {
+  products: Product[];
+  total_count: number;
+}
 
 export default function InventoryScreen() {
   const colorScheme = useColorScheme();
@@ -22,6 +39,8 @@ export default function InventoryScreen() {
   const [leadTime, setLeadTime] = useState('7');
   const [serviceLevel, setServiceLevel] = useState('0.95');
   const [loading, setLoading] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [productsLoading, setProductsLoading] = useState(false);
   interface OptimizationResult {
     eoq?: number;
     reorder_point?: number;
@@ -33,6 +52,34 @@ export default function InventoryScreen() {
   const [error, setError] = useState('');
   const [plotHtml, setPlotHtml] = useState('');
   const [activeTab, setActiveTab] = useState('optimize'); // 'optimize' or 'view'
+  
+  // Fetch products from API when the component mounts
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+  
+  // Reload products when the tab changes to 'view'
+  useEffect(() => {
+    if (activeTab === 'view') {
+      fetchProducts();
+    }
+  }, [activeTab]);
+  
+  // Function to fetch products from the API
+  const fetchProducts = async () => {
+    try {
+      setProductsLoading(true);
+      const response = await api.getProducts() as ProductsResponse;
+      if (response && response.products) {
+        setProducts(response.products);
+      }
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      setError('Failed to fetch products. Please try again.');
+    } finally {
+      setProductsLoading(false);
+    }
+  };
 
   const optimizeInventory = async () => {
     if (!productId) {
@@ -157,27 +204,198 @@ export default function InventoryScreen() {
     </View>
   );
 
+  const renderOptimizeContent = () => (
+    <>
+      <Card style={styles.formCard}>
+        <View style={styles.input}>
+          <ThemedText style={{marginBottom: 8, fontWeight: '500'}}>Product ID</ThemedText>
+          <View style={styles.selectContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {products.length > 0 ? (
+                products.map((product) => (
+                  <TouchableOpacity
+                    key={product.product_id}
+                    style={[
+                      styles.productButton,
+                      productId === product.product_id && styles.selectedProduct
+                    ]}
+                    onPress={() => {
+                      setProductId(product.product_id);
+                      // Also set the lead time from the product data
+                      setLeadTime(product.avg_lead_time.toString());
+                    }}
+                  >
+                    <ThemedText style={[
+                      styles.productButtonText,
+                      productId === product.product_id && styles.selectedProductText
+                    ]}>
+                      {product.product_id}
+                    </ThemedText>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <Input
+                  placeholder="Enter product ID"
+                  value={productId}
+                  onChangeText={setProductId}
+                  containerStyle={{flex: 1}}
+                />
+              )}
+            </ScrollView>
+          </View>
+        </View>
+        
+        <View style={styles.rowInputs}>
+          <View style={styles.halfInput}>
+            <Input
+              label="Holding Cost"
+              placeholder="10"
+              value={holdingCost}
+              onChangeText={setHoldingCost}
+              keyboardType="numeric"
+              containerStyle={styles.input}
+            />
+          </View>
+          <View style={styles.halfInput}>
+            <Input
+              label="Ordering Cost"
+              placeholder="100"
+              value={orderingCost}
+              onChangeText={setOrderingCost}
+              keyboardType="numeric"
+              containerStyle={styles.input}
+            />
+          </View>
+        </View>
+        
+        <View style={styles.rowInputs}>
+          <View style={styles.halfInput}>
+            <Input
+              label="Lead Time (days)"
+              placeholder="7"
+              value={leadTime}
+              onChangeText={setLeadTime}
+              keyboardType="numeric"
+              containerStyle={styles.input}
+            />
+          </View>
+          <View style={styles.halfInput}>
+            <Input
+              label="Service Level (0-1)"
+              placeholder="0.95"
+              value={serviceLevel}
+              onChangeText={setServiceLevel}
+              keyboardType="numeric"
+              containerStyle={styles.input}
+            />
+          </View>
+        </View>
+        
+        {error ? <ThemedText style={styles.errorText}>{error}</ThemedText> : null}
+        
+        <TouchableOpacity
+          style={[styles.button, loading && { opacity: 0.6 }]}
+          onPress={optimizeInventory}
+          disabled={loading}
+        >
+          <ThemedText style={{ textAlign: 'center', fontWeight: 'bold' }}>
+            {loading ? 'Optimizing...' : 'Optimize Inventory'}
+          </ThemedText>
+        </TouchableOpacity>
+      </Card>
+      
+      {/* Results */}
+      {optimizationData && (
+        <Card style={styles.resultsCard}>
+          <ThemedText type="subtitle">Optimization Results</ThemedText>
+          
+          <View style={styles.resultRow}>
+            <ThemedText style={styles.resultLabel}>Economic Order Quantity:</ThemedText>
+            <ThemedText style={styles.resultValue}>
+              {optimizationData.eoq?.toFixed(2) || '-'} units
+            </ThemedText>
+          </View>
+          
+          <View style={styles.resultRow}>
+            <ThemedText style={styles.resultLabel}>Reorder Point:</ThemedText>
+            <ThemedText style={styles.resultValue}>
+              {optimizationData.reorder_point?.toFixed(2) || '-'} units
+            </ThemedText>
+          </View>
+          
+          <View style={styles.resultRow}>
+            <ThemedText style={styles.resultLabel}>Safety Stock:</ThemedText>
+            <ThemedText style={styles.resultValue}>
+              {optimizationData.safety_stock?.toFixed(2) || '-'} units
+            </ThemedText>
+          </View>
+          
+          <View style={styles.resultRow}>
+            <ThemedText style={styles.resultLabel}>Total Cost:</ThemedText>
+            <ThemedText style={styles.resultValue}>
+              ${optimizationData.total_cost?.toFixed(2) || '-'}
+            </ThemedText>
+          </View>
+        </Card>
+      )}
+      
+      {/* Chart visualization */}
+      {plotHtml ? (
+        <Card style={styles.chartCard}>
+          <ThemedText type="subtitle">Inventory Level Projection</ThemedText>
+          <View style={styles.chartContainer}>
+            <WebView
+              source={{ html: plotHtml }}
+              style={styles.webView}
+              scrollEnabled={false}
+              javaScriptEnabled={true}
+              domStorageEnabled={true}
+              onError={(e) => console.error('WebView error:', e.nativeEvent)}
+              renderError={(errorName) => (
+                <View style={styles.errorContainer}>
+                  <ThemedText style={styles.errorText}>Error loading chart: {errorName}</ThemedText>
+                </View>
+              )}
+            />
+          </View>
+        </Card>
+      ) : null}
+    </>
+  );
+  
+
 
   const renderViewContent = (item: InventoryItemType[]) => (
     <Card style={styles.inventoryCard}>
       <ThemedText type="subtitle">Current Inventory</ThemedText>
-
+      
       {loading ? (
         <ActivityIndicator size="large" color={colors.tint} style={styles.loader} />
       ) : (
         <View style={styles.inventoryList}>
           {/* This would be populated from an API call to get inventory */}
-          {item.map((item) => (
+          {item.length > 0 ? item.map((inventoryItem) => (
             <InventoryItem
-              key={item.id}
-              id={item.id}
-              name={item.name}
-              quantity={item.quantity}
-              status={item.status}
+              key={inventoryItem.id}
+              id={inventoryItem.id}
+              name={inventoryItem.name}
+              quantity={inventoryItem.quantity}
+              status={inventoryItem.status}
             />
-          ))}
+          )) : (
+            <ThemedText style={styles.noDataText}>No inventory items found.</ThemedText>
+          )}
         </View>
       )}
+      
+      <TouchableOpacity
+        onPress={fetchProducts}
+        style={[styles.button, { marginTop: 16 }]}
+      >
+        <ThemedText style={{ textAlign: 'center', fontWeight: 'bold' }}>
+          Refresh Products
+        </ThemedText>
+      </TouchableOpacity>
     </Card>
   );
 
@@ -333,5 +551,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+  },
+  noDataText: {
+    textAlign: 'center',
+    marginVertical: 20,
+    opacity: 0.6,
+  },
+  itemCategory: {
+    fontSize: 12,
+    opacity: 0.6,
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
+  selectContainer: {
+    flexDirection: 'row',
+    marginBottom: 10,
+  },
+  productButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    marginRight: 8,
+    backgroundColor: 'rgba(150,150,150,0.1)',
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  selectedProduct: {
+    backgroundColor: Colors.light.tint + '20',
+    borderColor: Colors.light.tint,
+  },
+  productButtonText: {
+    fontSize: 14,
+  },
+  selectedProductText: {
+    color: Colors.light.tint,
+    fontWeight: 'bold',
   },
 });

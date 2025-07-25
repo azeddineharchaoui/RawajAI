@@ -1,8 +1,9 @@
 # app.py
 # Make sure to install these dependencies before running:
-!pip install transformers langchain-huggingface kaleido==0.2.1 torch torchaudio langchain_community bitsandbytes autoawq accelerate sentencepiece protobuf pulp scipy plotly==5.24.1 reportlab gtts pytrends faiss-cpu
-!pip install kaleido==0.2.1 plotly==5.24.1
-!pip install flask-cors
+# Required packages:
+!pip install transformers langchain-huggingface kaleido==0.2.1 torch torchaudio langchain_community bitsandbytes autoawq accelerate sentencepiece protobuf pulp scipy plotly==5.24.1 reportlab gtts pytrends faiss-cpu pydub==0.25.1 soundfile==0.12.1 ffmpeg-python==0.2.0
+!pip install kaleido==0.2.1 plotly==5.24.1 langchain_text_splitters==0.0.1 langchain_huggingface
+!pip install flask-cors==4.0.0 Flask-CORS==4.0.0 pypdf==3.17.0 langchain_core
 
 # Import Colab configuration
 from colab_config import setup_colab_environment, optimize_model_loading
@@ -36,6 +37,9 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 from io import BytesIO
 import base64
+import time
+import traceback
+import subprocess
 from datetime import datetime, timedelta
 import pytrends.request
 from pytrends.request import TrendReq
@@ -48,9 +52,12 @@ import pulp
 from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM, BitsAndBytesConfig
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
 import torchaudio
+import soundfile as sf
+from pydub import AudioSegment
 from gtts import gTTS
 from langchain.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 import torch
 import os
 import requests
@@ -58,33 +65,50 @@ import json
 import tempfile
 import subprocess
 import threading
+import traceback
 import socket
 import time
 import platform
 import re
-from flask import Flask
+import io
+from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
+
+# Import PDF handling libraries
+try:
+    from pypdf import PdfReader
+    PDF_SUPPORT = True
+except ImportError:
+    print("Warning: pypdf not installed. PDF document import will not be available.")
+    PDF_SUPPORT = False
 
 app = Flask(__name__)
 
 CORS(app) 
 
 # Configuration
-os.environ["HF_TOKEN"] = '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'
+os.environ["HF_TOKEN"] = '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'
 MODEL_NAME = "mistralai/Mistral-7B-v0.1"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-WHISPER_MODEL = "openai/whisper-base"
-DATA_PATH = "supply_chain_data.csv"
-WEATHER_DATA_PATH = "weather_data.csv"
-TRENDS_DATA_PATH = "trends_data.csv"
-VECTOR_DB_PATH = "supply_chain_faiss_index"
-REPORT_PATH = "reports"
-AUDIO_PATH = "audio"
+WHISPER_MODEL = "openai/whisper-medium"
+DATA_PATH = '/content/supply_chain_dataset.csv'
+WEATHER_DATA_PATH = '/content/weather_data.csv'
+TRENDS_DATA_PATH = '/content/trends_data.csv'
+VECTOR_DB_PATH = 'supply_chain_faiss_index'
+REPORT_PATH = 'reports'
+AUDIO_PATH = 'audio'
 
 # Ensure directories exist
 for path in [VECTOR_DB_PATH, REPORT_PATH, AUDIO_PATH]:
-    if not os.path.exists(path):
-        os.makedirs(path)
+    try:
+        if not os.path.exists(path):
+            print(f"Creating directory: {path}")
+            os.makedirs(path)
+        else:
+            print(f"Directory already exists: {path}")
+    except Exception as dir_error:
+        print(f"Error creating directory {path}: {dir_error}")
+        # Try to continue anyway
 
 # Initialize language model with optimizations
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -119,54 +143,407 @@ llm_pipeline = pipeline(
 # Clean memory again after pipeline setup
 clean_memory()
 
-# Initialize Whisper for speech recognition
+# Initialize Whisper for speech recognition - force CPU to avoid device mismatch errors
+whisper_processor = None
+whisper_model = None
+
+# Force using CPU for Whisper regardless of CUDA availability
+device = "cpu"
+
+# Define the transcribe_audio function at global scope so it's accessible everywhere
+def transcribe_audio(audio_file, target_language="en"):
+    """Transcribe audio file using Whisper with optimized accuracy and performance"""
+    try:
+        import os
+        import subprocess
+        from pydub import AudioSegment
+        import soundfile as sf
+        import numpy as np
+        import torch
+        import torchaudio
+        
+        print(f"Transcribing audio with target language: {target_language}")
+        
+        # Check file existence
+        if not os.path.exists(audio_file):
+            print(f"Audio file does not exist: {audio_file}")
+            return "Error: Audio file not found"
+        
+        # Check file size
+        file_size = os.path.getsize(audio_file)
+        if file_size == 0:
+            print("Empty audio file received")
+            return "Error: Empty audio file"
+        
+        print(f"Processing audio file: {audio_file} (Size: {file_size} bytes)")
+        
+        # ===== 1. AUDIO PREPROCESSING - OPTIMIZED =====
+        # Prepare optimized audio for Whisper
+        temp_wav_path = f"{os.path.splitext(audio_file)[0]}_whisper_compatible.wav"
+        
+        try:
+            # Load and normalize audio with pydub
+            audio = AudioSegment.from_file(audio_file)
+            
+            # Voice activity detection to trim silence (improves accuracy)
+            from pydub.silence import detect_nonsilent
+            
+            # Detect non-silent chunks with lenient parameters
+            non_silent_chunks = detect_nonsilent(
+                audio, 
+                min_silence_len=500,  # 500ms silence threshold
+                silence_thresh=-40    # -40 dBFS silence threshold (higher = more aggressive)
+            )
+            
+            # If we found non-silent chunks, keep only those parts
+            if non_silent_chunks and len(non_silent_chunks) > 0:
+                # Add small padding around non-silent chunks
+                padding_ms = 200  # 200ms padding
+                chunks = []
+                for start, end in non_silent_chunks:
+                    chunk_start = max(0, start - padding_ms)
+                    chunk_end = min(len(audio), end + padding_ms)
+                    chunks.append(audio[chunk_start:chunk_end])
+                
+                # Combine chunks
+                if chunks:
+                    audio = sum(chunks, AudioSegment.empty())
+                    print(f"Trimmed silence: {len(audio)/1000:.2f}s (from original {len(audio)/1000:.2f}s)")
+            
+            # Convert to mono and 16kHz with high quality settings
+            audio = audio.set_channels(1)
+            audio = audio.set_frame_rate(16000)
+            
+            # Normalize audio volume for better recognition (target_dBFS = -14)
+            target_dBFS = -14.0
+            change_in_dBFS = target_dBFS - audio.dBFS
+            normalized_audio = audio.apply_gain(change_in_dBFS)
+            
+            # Export with optimal parameters for Whisper
+            normalized_audio.export(
+                temp_wav_path, 
+                format="wav", 
+                parameters=[
+                    "-acodec", "pcm_s16le", 
+                    "-ar", "16000", 
+                    "-ac", "1",
+                    "-sample_fmt", "s16"
+                ]
+            )
+            
+            print(f"Enhanced audio saved to: {temp_wav_path}")
+            
+            # Verify file was created properly
+            if os.path.exists(temp_wav_path) and os.path.getsize(temp_wav_path) > 0:
+                audio_file = temp_wav_path
+            else:
+                print("WARNING: Enhanced audio file is empty, will try alternate methods")
+        except Exception as audio_error:
+            print(f"Audio enhancement failed: {audio_error}")
+            # Fallback to basic conversion
+            try:
+                print("Falling back to basic ffmpeg conversion...")
+                command = f'ffmpeg -y -i "{audio_file}" -ac 1 -ar 16000 -c:a pcm_s16le "{temp_wav_path}"'
+                subprocess.run(command, shell=True, check=True, stderr=subprocess.PIPE)
+                if os.path.exists(temp_wav_path) and os.path.getsize(temp_wav_path) > 0:
+                    audio_file = temp_wav_path
+            except Exception as ffmpeg_error:
+                print(f"FFmpeg conversion failed: {ffmpeg_error}")
+                # Continue with original file
+        
+        # Check model availability
+        global whisper_model, whisper_processor
+        if whisper_model is None or whisper_processor is None:
+            return "Speech recognition model is not initialized. Please try again later."
+        
+        # ===== 2. AUDIO LOADING - OPTIMIZED =====
+        # Load audio with consistent approach
+        try:
+            # Load with soundfile (optimized for WAV)
+            audio_data, sample_rate = sf.read(audio_file)
+            
+            # Ensure audio is the right format (float32, normalized, mono)
+            if audio_data.dtype != np.float32:
+                audio_data = audio_data.astype(np.float32)
+            
+            # Convert to mono if needed
+            if len(audio_data.shape) > 1 and audio_data.shape[1] > 1:
+                audio_data = np.mean(audio_data, axis=1)
+            
+            # Normalize audio to [-1.0, 1.0] range
+            if np.abs(audio_data).max() > 0.0:
+                audio_data = audio_data / np.abs(audio_data).max()
+            
+            print(f"Audio loaded successfully: shape={audio_data.shape}, sr={sample_rate}")
+        except Exception as load_error:
+            print(f"Error loading audio: {load_error}")
+            return "Error processing audio: Could not load the audio file"
+        
+        # ===== 3. WHISPER PROCESSING - OPTIMIZED =====
+        print("Processing with Whisper model...")
+        try:
+            # Move model to appropriate device once
+            device = next(whisper_model.parameters()).device
+            print(f"Using Whisper model on device: {device}")
+            
+            # Full language support map - common Whisper languages
+            language_map = {
+                # Common languages
+                "en": "english", "fr": "french", "ar": "arabic", 
+                # Special handling
+                "auto": None
+            }
+            
+            # Set task type - important for accuracy
+            task = "transcribe"  # For transcription (vs. translation)
+            
+            # Handle language selection with better mapping
+            if target_language.lower() == "auto":
+                print("Auto language detection enabled")
+                forced_decoder_ids = None
+                detected_language = "auto"
+            else:
+                # Check if we can get a direct mapping
+                mapped_lang = language_map.get(target_language.lower(), None)
+                
+                if mapped_lang:
+                    print(f"Using specified language: {mapped_lang}")
+                    try:
+                        # Try to get decoder IDs for this language
+                        forced_decoder_ids = whisper_processor.get_decoder_prompt_ids(
+                            language=mapped_lang, 
+                            task=task
+                        )
+                        detected_language = target_language.lower()
+                    except Exception as lang_error:
+                        print(f"Error setting language '{mapped_lang}': {lang_error}")
+                        print("Falling back to auto-detection")
+                        forced_decoder_ids = None
+                        detected_language = "auto"
+                else:
+                    print(f"Language '{target_language}' not recognized, enabling auto-detection")
+                    forced_decoder_ids = None
+                    detected_language = "auto"
+            
+            # Process audio features
+            input_features = whisper_processor(
+                audio_data, 
+                sampling_rate=sample_rate,
+                return_tensors="pt"
+            ).input_features
+            
+            # Ensure features are on same device as model
+            input_features = input_features.to(device)
+            
+            # Run inference with optimized parameters
+            print("Running Whisper inference...")
+            with torch.no_grad():
+                # Use compatible generation parameters for improved accuracy
+                generation_kwargs = {
+                    "forced_decoder_ids": forced_decoder_ids,
+                    "max_length": 448,        # Longer context
+                    "num_beams": 5,           # Beam search for better results
+                    "temperature": 0.0        # Greedy decoding for accuracy
+                }
+                
+                # Only add language and task if not auto-detection
+                if detected_language != "auto":
+                    generation_kwargs["language"] = detected_language
+                    generation_kwargs["task"] = task
+                
+                # We'll use a safer approach - only use known working parameters
+                # This avoids the error with condition_on_previous_text and other unsupported params
+                
+                # Safe parameters that work across all Whisper versions
+                print("Using safe generation parameters for maximum compatibility")
+                
+                # Generate transcription
+                predicted_ids = whisper_model.generate(
+                    input_features,
+                    **generation_kwargs
+                )
+            
+            # Decode the output
+            result = whisper_processor.batch_decode(
+                predicted_ids, 
+                skip_special_tokens=True,
+                normalize=True  # Normalize text for better readability
+            )[0]
+            
+            # ===== 4. POST-PROCESSING - IMPROVED =====
+            # Clean up transcription for better readability
+            import re
+            
+            # Remove repeated spaces
+            result = re.sub(r'\s+', ' ', result).strip()
+            
+            # Fix common transcription artifacts
+            result = re.sub(r'\(silence\)', '', result)
+            result = re.sub(r'\(music\)', '', result)
+            result = re.sub(r'\(laughter\)', '', result)
+            result = re.sub(r'\(applause\)', '', result)
+            result = re.sub(r'\(inaudible\)', '', result)
+            
+            # Ensure proper capitalization
+            if result and len(result) > 0:
+                result = result[0].upper() + result[1:]
+                
+            # Add proper ending punctuation if missing
+            if result and len(result) > 0 and not result[-1] in '.!?':
+                result += '.'
+                
+            print(f"Transcription successful: {result[:100]}...")
+            return result
+            
+        except Exception as whisper_error:
+            print(f"Whisper processing error: {whisper_error}")
+            import traceback
+            traceback.print_exc()
+            
+            # Try to provide a more user-friendly error message
+            error_str = str(whisper_error)
+            friendly_message = "Error processing audio with Whisper"
+            
+            # Known error patterns
+            if "device" in error_str.lower():
+                friendly_message = "Audio processing device error. Trying again might help."
+            elif "memory" in error_str.lower() or "cuda" in error_str.lower():
+                friendly_message = "System memory issue with speech recognition. Try a shorter audio clip."
+            elif "model" in error_str.lower() and "kwargs" in error_str.lower():
+                friendly_message = "Speech recognition configuration issue. This will be fixed in the next update."
+            
+            print(f"Friendly message: {friendly_message}")
+            return friendly_message
+            
+    except Exception as e:
+        print(f"Transcription failed with error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return f"Error transcribing audio: {str(e)}"
+
+# Optimized Whisper model initialization
 try:
-    whisper_processor = WhisperProcessor.from_pretrained(WHISPER_MODEL)
-    whisper_model = WhisperForConditionalGeneration.from_pretrained(WHISPER_MODEL)
-    whisper_model.to("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Loading optimized Whisper model: {WHISPER_MODEL}")
     
-    def transcribe_audio(audio_file, target_language="en"):
-        """Transcribe audio file using Whisper"""
-        # Load audio
-        audio_array, sampling_rate = torchaudio.load(audio_file)
-        # Convert to mono if stereo
-        if audio_array.shape[0] > 1:
-            audio_array = torch.mean(audio_array, dim=0, keepdim=True)
-        
-        # Resample if needed
-        if sampling_rate != 16000:
-            resampler = torchaudio.transforms.Resample(sampling_rate, 16000)
-            audio_array = resampler(audio_array)
-            sampling_rate = 16000
-        
-        # Process audio with Whisper
-        input_features = whisper_processor(audio_array.squeeze().numpy(), sampling_rate=16000, return_tensors="pt").input_features
-        forced_decoder_ids = whisper_processor.get_decoder_prompt_ids(language=target_language, task="transcribe")
-        
-        # Generate transcription
-        predicted_ids = whisper_model.generate(input_features, forced_decoder_ids=forced_decoder_ids)
-        transcription = whisper_processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
-        
-        return transcription
-except Exception as e:
-    print(f"Whisper initialization failed: {e}. Speech recognition will not be available.")
+    # Check for better model availability
+    # available_models = [
+    #     "openai/whisper-large-v3",  # Best accuracy but more resources
+    #     "openai/whisper-medium",     # Good balance of accuracy and speed
+    #     "openai/whisper-small",      # Faster but still decent accuracy
+    #     "openai/whisper-base",       # Default/fallback
+    # ]
     
-    def transcribe_audio(audio_file, target_language="en"):
-        return f"Speech recognition unavailable. Error: {str(e)}"
+    # Try to load the best available model, falling back to simpler ones
+    loaded_model = None
+    selected_model = None
+    
+    # for model_name in available_models:
+    #     try:
+    #         print(f"Attempting to load {model_name}...")
+    #         # Check if we have enough resources for this model
+    #         if model_name == "openai/whisper-large-v3" and (
+    #             not torch.cuda.is_available() or 
+    #             torch.cuda.get_device_properties(0).total_memory < 8 * 1024 * 1024 * 1024  # 8GB
+    #         ):
+    #             print(f"Skipping {model_name} as it requires more resources")
+    #             continue
+                
+    #         # Load the processor first (lightweight)
+    #         whisper_processor = WhisperProcessor.from_pretrained(model_name)
+    #         selected_model = model_name
+    #         break
+    #     except Exception as model_error:
+    #         print(f"Failed to load {model_name}: {model_error}")
+    #         continue
+    
+    # If we couldn't load any better model, fall back to the default
+    if selected_model is None:
+        try:
+            print(f"Loading default Whisper model: {WHISPER_MODEL}")
+            whisper_processor = WhisperProcessor.from_pretrained(WHISPER_MODEL)
+            selected_model = WHISPER_MODEL
+        except Exception as model_error:
+            print(f"Error loading default model: {model_error}")
+            print("Attempting to load the smallest Whisper model as fallback...")
+            try:
+                whisper_processor = WhisperProcessor.from_pretrained("openai/whisper-tiny")
+                selected_model = "openai/whisper-tiny"
+            except:
+                print("Critical: Failed to load any Whisper model")
+                raise  # Re-raise the exception to be caught by the outer try-except
+    
+    print(f"Selected Whisper model: {selected_model}")
+    
+    # Determine optimal device with consistent approach
+    device = "cpu"
+    if torch.cuda.is_available():
+        try:
+            # Check available GPU memory - require at least 2GB free for stable performance
+            free_memory = torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_allocated(0)
+            memory_required = 2 * 1024 * 1024 * 1024  # 2GB in bytes
+            
+            if free_memory >= memory_required:
+                device = "cuda"
+                print(f"Using CUDA with {free_memory / (1024**3):.1f}GB free memory")
+                
+                # Simplified loading for stability
+                print("Loading model with standard configuration")
+                whisper_model = WhisperForConditionalGeneration.from_pretrained(selected_model)
+                whisper_model.to(device)
+            else:
+                print(f"Insufficient GPU memory ({free_memory / (1024**3):.1f}GB free), using CPU")
+                # For CPU inference, we'll load the model directly
+                whisper_model = WhisperForConditionalGeneration.from_pretrained(selected_model)
+        except Exception as cuda_error:
+            print(f"Error configuring CUDA: {cuda_error}, falling back to CPU")
+            device = "cpu"
+            whisper_model = WhisperForConditionalGeneration.from_pretrained(selected_model)
+    else:
+        print("CUDA not available, using CPU")
+        whisper_model = WhisperForConditionalGeneration.from_pretrained(selected_model)
+    
+    # Ensure model is on the correct device
+    if device == "cpu" and next(whisper_model.parameters()).device.type != "cpu":
+        whisper_model = whisper_model.to("cpu")
+        
+    print(f"Whisper model initialized successfully on {device}")
+    
+    # Test the model with a tiny sample to ensure it's working
+    try:
+        print("Testing Whisper model with synthetic sample...")
+        # Create a small test sample (silent audio)
+        test_audio = np.zeros((16000,), dtype=np.float32)  # 1 second of silence
+        
+        # Run quick inference to ensure everything is initialized
+        with torch.no_grad():
+            test_inputs = whisper_processor(test_audio, sampling_rate=16000, return_tensors="pt").input_features
+            test_inputs = test_inputs.to(next(whisper_model.parameters()).device)
+            _ = whisper_model.generate(test_inputs, max_length=20)
+        
+        print("Whisper model test successful, ready for transcription")
+    except Exception as test_error:
+        print(f"Whisper model test failed: {test_error}, but continuing anyway")
+        
+except Exception as whisper_init_error:
+    print(f"Error initializing Whisper model: {whisper_init_error}")
+    # Create fallback dummy_transcribe function
+    def dummy_transcribe(audio_file, target_language="en"):
+        return "Speech recognition is currently unavailable. Please try again later."
+    
+    # Override transcribe_audio to use dummy_transcribe
+    transcribe_audio = dummy_transcribe
+
 
 # Text-to-Speech function using gTTS
 def generate_speech(text, language="en"):
-    """Generate speech from text using Google Text-to-Speech"""
+    """Generate speech from text using Google Text-to-Speech with support for long texts"""
     try:
         # Validate input text
         if not text or not isinstance(text, str):
             print("Invalid text for speech generation")
             return None
             
-        # Limit text length to avoid issues with very long text
-        max_length = 4000  # gTTS has limitations on text length
-        if len(text) > max_length:
-            text = text[:max_length] + "..."
+        print(f"Generating speech for {len(text)} characters of text")
         
         # Map language code for gTTS
         lang_map = {
@@ -180,22 +557,183 @@ def generate_speech(text, language="en"):
         if not os.path.exists(AUDIO_PATH):
             os.makedirs(AUDIO_PATH, exist_ok=True)
         
-        # Generate speech
-        tts = gTTS(text=text, lang=lang, slow=False)
+        # Clean up old audio files (older than 24 hours) to prevent disk fill-up
+        try:
+            cleanup_time = time.time() - (24 * 60 * 60)  # 24 hours ago
+            for old_file in os.listdir(AUDIO_PATH):
+                file_path = os.path.join(AUDIO_PATH, old_file)
+                if os.path.isfile(file_path) and os.path.getmtime(file_path) < cleanup_time:
+                    try:
+                        os.remove(file_path)
+                        print(f"Cleaned up old audio file: {old_file}")
+                    except:
+                        pass
+        except Exception as cleanup_error:
+            print(f"Error during audio cleanup: {cleanup_error}")
         
-        # Save to file with proper error handling
+        # Generate a unique timestamp for this audio file
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         filename = f"{AUDIO_PATH}/response_{timestamp}.mp3"
         
-        # Try saving the file
-        try:
-            tts.save(filename)
-        except Exception as save_error:
-            print(f"Error saving speech file: {save_error}")
-            # Try with a simpler filename if there might be path issues
-            simple_filename = f"{AUDIO_PATH}/response.mp3"
-            tts.save(simple_filename)
-            filename = simple_filename
+        # Check if text exceeds gTTS limitations
+        max_chunk_length = 5000  # Safe limit for gTTS
+        
+        if len(text) <= max_chunk_length:
+            # Standard case - text is within limits
+            try:
+                # Use slow=False for normal speed, but can be adjusted for clarity if needed
+                tts = gTTS(text=text, lang=lang, slow=False)
+                
+                # Add linear backoff retry mechanism for network issues
+                max_retries = 3
+                retry_delay = 1
+                for attempt in range(max_retries):
+                    try:
+                        tts.save(filename)
+                        print(f"Successfully saved speech file on attempt {attempt+1}")
+                        break
+                    except Exception as retry_error:
+                        if attempt < max_retries - 1:
+                            retry_delay +=1    # linear backoff: 1s, 2s, 3s
+                            print(f"Retrying TTS save after {retry_delay}s delay. Error: {retry_error}")
+                            time.sleep(retry_delay)
+                        else:
+                            raise  # Re-raise on final attempt
+                            
+            except Exception as save_error:
+                print(f"Error saving speech file after retries: {save_error}")
+                # Try with a simpler filename if there might be path issues
+                simple_filename = f"{AUDIO_PATH}/response.mp3"
+                try:
+                    tts.save(simple_filename)
+                    filename = simple_filename
+                except Exception as final_error:
+                    print(f"Final attempt to save speech failed: {final_error}")
+                    return None
+        else:
+            # Handle long text by breaking it into chunks
+            print(f"Text exceeds max length ({len(text)} chars). Splitting into chunks.")
+            
+            # Split by sentences to avoid breaking mid-sentence
+            import re
+            
+            # Split text into sentences with improved sentence boundary detection
+            # This regex handles common sentence terminators and preserves punctuation
+            sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z0-9])', text)
+            
+            # If we couldn't split properly (e.g., no capitalization after periods)
+            if len(sentences) <= 1:
+                # Fall back to simpler sentence splitting
+                sentences = re.split(r'(?<=[.!?])\s+', text)
+            
+            # If text is still not properly split, use a more aggressive approach
+            if len(sentences) <= 3 and len(text) > max_chunk_length * 2:
+                # Split on any period, question mark, or exclamation mark
+                sentences = re.split(r'(?<=[.!?])', text)
+                # Clean up any empty items
+                sentences = [s.strip() for s in sentences if s.strip()]
+            
+            chunks = []
+            current_chunk = ""
+            
+            # Group sentences into chunks under the max length, being careful
+            # not to exceed the maximum chunk size
+            for sentence in sentences:
+                # If the sentence itself exceeds the max length, split it further
+                if len(sentence) > max_chunk_length:
+                    # If we have a current chunk, add it first
+                    if current_chunk:
+                        chunks.append(current_chunk.strip())
+                        current_chunk = ""
+                    
+                    # Split long sentence by phrases (commas, semicolons, etc.)
+                    phrases = re.split(r'(?<=[,;:])\s+', sentence)
+                    phrase_chunk = ""
+                    
+                    for phrase in phrases:
+                        if len(phrase_chunk) + len(phrase) < max_chunk_length:
+                            phrase_chunk += phrase + " "
+                        else:
+                            if phrase_chunk:
+                                chunks.append(phrase_chunk.strip())
+                            phrase_chunk = phrase + " "
+                    
+                    # Add the last phrase chunk if not empty
+                    if phrase_chunk.strip():
+                        current_chunk = phrase_chunk.strip()
+                    
+                # Normal case - add sentence to current chunk if it fits
+                elif len(current_chunk) + len(sentence) < max_chunk_length:
+                    current_chunk += sentence + " "
+                else:
+                    # Current chunk is full, store it and start a new one
+                    if current_chunk:
+                        chunks.append(current_chunk.strip())
+                    current_chunk = sentence + " "
+            
+            # Add the last chunk if not empty
+            if current_chunk.strip():
+                chunks.append(current_chunk.strip())
+                
+            # Ensure we have at least one chunk
+            if not chunks and text:
+                # Emergency fallback - split by a fixed size
+                chunks = [text[i:i+max_chunk_length] for i in range(0, len(text), max_chunk_length)]
+            
+            print(f"Split text into {len(chunks)} chunks for TTS processing")
+            
+            # Process each chunk and combine the audio files
+            chunk_files = []
+            
+            for i, chunk in enumerate(chunks):
+                chunk_filename = f"{AUDIO_PATH}/chunk_{timestamp}_{i}.mp3"
+                try:
+                    chunk_tts = gTTS(text=chunk, lang=lang, slow=False)
+                    chunk_tts.save(chunk_filename)
+                    chunk_files.append(chunk_filename)
+                    print(f"Generated chunk {i+1}/{len(chunks)}")
+                except Exception as chunk_error:
+                    print(f"Error processing chunk {i}: {chunk_error}")
+            
+            # Combine audio files if we have at least one successful chunk
+            if chunk_files:
+                try:
+                    from pydub import AudioSegment
+                    
+                    combined = AudioSegment.empty()
+                    for chunk_file in chunk_files:
+                        segment = AudioSegment.from_mp3(chunk_file)
+                        combined += segment
+                    
+                    # Save the combined file
+                    combined.export(filename, format="mp3")
+                    
+                    # Clean up chunk files
+                    for chunk_file in chunk_files:
+                        try:
+                            os.remove(chunk_file)
+                        except:
+                            pass
+                            
+                except ImportError:
+                    print("pydub not available, using first chunk as response")
+                    if chunk_files:
+                        filename = chunk_files[0]
+                except Exception as combine_error:
+                    print(f"Error combining audio chunks: {combine_error}")
+                    # Fall back to first chunk if combining fails
+                    if chunk_files:
+                        filename = chunk_files[0]
+            else:
+                # If all chunks failed, try with a shortened version of the text
+                try:
+                    print("All chunks failed, falling back to shortened text")
+                    shortened_text = text[:max_chunk_length] + "..."
+                    tts = gTTS(text=shortened_text, lang=lang, slow=False)
+                    tts.save(filename)
+                except Exception as fallback_error:
+                    print(f"Fallback TTS also failed: {fallback_error}")
+                    return None
         
         # Verify the file was created
         if os.path.exists(filename):
@@ -216,6 +754,7 @@ def load_data():
     # Supply chain data
     if os.path.exists(DATA_PATH):
         supply_chain_data = pd.read_csv(DATA_PATH)
+        print("Supply chain data loaded successfully.")
     else:
         # Create simulated data
         print("Creating simulated supply chain data...")
@@ -260,6 +799,7 @@ def load_data():
     # Weather data
     if os.path.exists(WEATHER_DATA_PATH):
         weather_data = pd.read_csv(WEATHER_DATA_PATH)
+        print("Weather data loaded successfully.")
     else:
         # Create simulated weather data
         print("Creating simulated weather data...")
@@ -294,6 +834,7 @@ def load_data():
     # Google Trends data
     if os.path.exists(TRENDS_DATA_PATH):
         trends_data = pd.read_csv(TRENDS_DATA_PATH)
+        print("Google Trends data loaded successfully.")
     else:
         # Try to fetch real Google Trends data or simulate if it fails
         print("Attempting to fetch Google Trends data...")
@@ -368,42 +909,145 @@ def merge_data_for_modeling():
     
     return merged_data
 
+
 merged_data = merge_data_for_modeling()
 
-# Sample supply chain documents for RAG
-supply_chain_docs = [
-    "Just-in-time inventory reduces holding costs but increases risk of stockouts",
-    "EOQ (Economic Order Quantity) balances ordering and holding costs",
-    "Safety stock protects against demand variability and lead time uncertainty",
-    "Cross-docking reduces inventory handling and storage time",
-    "ABC analysis prioritizes inventory management based on item value",
-    "La gestion des stocks juste à temps réduit les coûts de stockage mais augmente le risque de rupture de stock",
-    "Le QEC (Quantité Économique de Commande) équilibre les coûts de commande et de stockage",
-    "Le stock de sécurité protège contre la variabilité de la demande et l'incertitude des délais de livraison",
-    "Le cross-docking réduit la manipulation et le temps de stockage des inventaires",
-    "L'analyse ABC priorise la gestion des stocks en fonction de la valeur des articles",
-    "إدارة المخزون في الوقت المناسب تقلل تكاليف الاحتفاظ بالمخزون ولكنها تزيد من خطر نفاد المخزون",
-    "كمية الطلب الاقتصادية توازن بين تكاليف الطلب وتكاليف الاحتفاظ بالمخزون",
-    "مخزون الأمان يحمي من تقلبات الطلب وعدم اليقين في وقت التسليم",
-    "التحميل المتقاطع يقلل من مناولة المخزون ووقت التخزين",
-    "تحليل ABC يعطي الأولوية لإدارة المخزون على أساس قيمة العناصر",
-    "Adverse weather conditions like heavy rain or snow can delay deliveries and increase lead time",
-    "Seasonal demand patterns affect inventory planning, with higher demand during holidays",
-    "Supply chain disruptions can occur due to natural disasters, labor strikes, or geopolitical events",
-    "Demand forecasting accuracy improves with external data like weather and search trends",
-    "Warehouse capacity constraints can limit inventory levels during peak seasons",
-    "Les conditions météorologiques défavorables comme la pluie ou la neige peuvent retarder les livraisons",
-    "Les tendances de recherche Google peuvent prédire la demande future pour certains produits",
-    "L'optimisation des niveaux de stock réduit les coûts tout en maintenant le service client",
-    "الظروف الجوية السيئة مثل المطر الغزير أو الثلج يمكن أن تؤخر التسليم وتزيد وقت التسليم",
-    "أنماط الطلب الموسمية تؤثر على تخطيط المخزون، مع ارتفاع الطلب خلال العطلات",
-    "يمكن أن تحدث اضطرابات في سلسلة التوريد بسبب الكوارث الطبيعية أو الإضرابات العمالية"
-]
+# Load, process, and index documents from the documents directory
+def load_and_process_documents():
+    """
+    Load documents from the documents directory,
+    process them into chunks, and add them to the vector store
+    """
+    print("Loading documents from 'documents' directory...")
+    
+    # Base supply chain knowledge - always include these for consistent performance
+    supply_chain_docs = [
+        "Just-in-time inventory reduces holding costs but increases risk of stockouts",
+        "EOQ (Economic Order Quantity) balances ordering and holding costs",
+        "Safety stock protects against demand variability and lead time uncertainty",
+        "Cross-docking reduces inventory handling and storage time",
+        "ABC analysis prioritizes inventory management based on item value",
+        "La gestion des stocks juste à temps réduit les coûts de stockage mais augmente le risque de rupture de stock",
+        "Le QEC (Quantité Économique de Commande) équilibre les coûts de commande et de stockage",
+        "Le stock de sécurité protège contre la variabilité de la demande et l'incertitude des délais de livraison",
+        "Le cross-docking réduit la manipulation et le temps de stockage des inventaires",
+        "L'analyse ABC priorise la gestion des stocks en fonction de la valeur des articles",
+        "إدارة المخزون في الوقت المناسب تقلل تكاليف الاحتفاظ بالمخزون ولكنها تزيد من خطر نفاد المخزون",
+        "كمية الطلب الاقتصادية توازن بين تكاليف الطلب وتكاليف الاحتفاظ بالمخزون",
+        "مخزون الأمان يحمي من تقلبات الطلب وعدم اليقين في وقت التسليم",
+        "التحميل المتقاطع يقلل من مناولة المخزون ووقت التخزين",
+        "تحليل ABC يعطي الأولوية لإدارة المخزون على أساس قيمة العناصر",
+        "Adverse weather conditions like heavy rain or snow can delay deliveries and increase lead time",
+        "Seasonal demand patterns affect inventory planning, with higher demand during holidays",
+        "Supply chain disruptions can occur due to natural disasters, labor strikes, or geopolitical events",
+        "Demand forecasting accuracy improves with external data like weather and search trends",
+        "Warehouse capacity constraints can limit inventory levels during peak seasons",
+        "Les conditions météorologiques défavorables comme la pluie ou la neige peuvent retarder les livraisons",
+        "Les tendances de recherche Google peuvent prédire la demande future pour certains produits",
+        "L'optimisation des niveaux de stock réduit les coûts tout en maintenant le service client",
+        "الظروف الجوية السيئة مثل المطر الغزير أو الثلج يمكن أن تؤخر التسليم وتزيد وقت التسليم",
+        "أنماط الطلب الموسمية تؤثر على تخطيط المخزون، مع ارتفاع الطلب خلال العطلات",
+        "يمكن أن تحدث اضطرابات في سلسلة التوريد بسبب الكوارث الطبيعية أو الإضرابات العمالية"
+    ]
+    
+    all_docs = list(supply_chain_docs)  # Start with base knowledge
+    doc_meta = {}  # Store metadata about loaded documents
+    
+    # Create documents directory if it doesn't exist
+    documents_dir = "documents"
+    if not os.path.exists(documents_dir):
+        os.makedirs(documents_dir)
+        print(f"Created documents directory at {documents_dir}")
+    
+    # Initialize text splitter for document chunking
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        length_function=len,
+        separators=["\n\n", "\n", ". ", " ", ""]
+    )
+    
+    # Process PDF files
+    if PDF_SUPPORT:
+        pdf_files = [f for f in os.listdir(documents_dir) if f.lower().endswith('.pdf')]
+        print(f"Found {len(pdf_files)} PDF files in documents directory")
+        
+        for pdf_file in pdf_files:
+            file_path = os.path.join(documents_dir, pdf_file)
+            try:
+                print(f"Processing PDF file: {pdf_file}")
+                
+                # Extract text from PDF
+                pdf_text = process_pdf(file_path)
+                if pdf_text:
+                    # Split text into chunks
+                    chunks = text_splitter.split_text(pdf_text)
+                    print(f"  - Extracted {len(chunks)} text chunks from {pdf_file}")
+                    
+                    # Add chunks to documents list
+                    all_docs.extend(chunks)
+                    
+                    # Store metadata
+                    doc_meta[pdf_file] = {
+                        'type': 'pdf',
+                        'chunks': len(chunks),
+                        'size': os.path.getsize(file_path),
+                        'added_on': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                else:
+                    print(f"  - No text could be extracted from {pdf_file}")
+            except Exception as e:
+                print(f"  - Error processing {pdf_file}: {str(e)}")
+    else:
+        print("PDF support is not available. Install pypdf package to enable PDF processing.")
+    
+    # Process plain text files
+    txt_files = [f for f in os.listdir(documents_dir) if f.lower().endswith('.txt')]
+    print(f"Found {len(txt_files)} text files in documents directory")
+    
+    for txt_file in txt_files:
+        file_path = os.path.join(documents_dir, txt_file)
+        try:
+            print(f"Processing text file: {txt_file}")
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+                
+            # Split text into chunks
+            chunks = text_splitter.split_text(text)
+            print(f"  - Extracted {len(chunks)} text chunks from {txt_file}")
+            
+            # Add chunks to documents list
+            all_docs.extend(chunks)
+            
+            # Store metadata
+            doc_meta[txt_file] = {
+                'type': 'txt',
+                'chunks': len(chunks),
+                'size': os.path.getsize(file_path),
+                'added_on': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+        except Exception as e:
+            print(f"  - Error processing {txt_file}: {str(e)}")
+    
+    # Save document metadata
+    try:
+        with open(os.path.join(documents_dir, 'document_metadata.json'), 'w') as f:
+            json.dump(doc_meta, f, indent=2)
+    except Exception as e:
+        print(f"Error saving document metadata: {str(e)}")
+    
+    print(f"Total documents/chunks for vector store: {len(all_docs)}")
+    return all_docs
+
+# Initialize embeddings
 embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
-# Create vector store
+# Load documents and create vector store
+print("Initializing knowledge base...")
+supply_chain_docs = load_and_process_documents()
 vector_store = FAISS.from_texts(supply_chain_docs, embeddings)
 vector_store.save_local(VECTOR_DB_PATH)
+print(f"Knowledge base created and saved at {VECTOR_DB_PATH}")
 
 # Advanced forecasting models
 class ForecastingEngine:
@@ -479,7 +1123,7 @@ class ForecastingEngine:
             prophet_data[f'{product_id}_trend'] = product_data[product_id]
         
         # Create and train Prophet model
-        model = Prophet(yearly_seasonality=True, weekly_seasonality=True, daily_seasonality=False)
+        model = Prophet(yearly_seasonality=True, monthly_seasonality=True, weekly_seasonality=True, daily_seasonality=False)
         
         # Add regressors
         for regressor in regressors:
@@ -1526,89 +2170,315 @@ class ReportGenerator:
 report_generator = ReportGenerator()
 
 # Multilingual response generation
+def post_process_response(text, language="en"):
+    """
+    Post-process the LLM response to make it more suitable for conversation and TTS
+    
+    This function cleans up the response to ensure it's well-formatted for speech synthesis
+    and doesn't contain elements that would sound awkward when spoken.
+    
+    It also ensures responses are formatted in 2-3 paragraphs without numbered phrases.
+    """
+    import re
+    
+    # Skip if the text is empty or too short
+    if not text or len(text.strip()) < 5:
+        return text
+    
+    # Remove any markdown code blocks
+    text = re.sub(r'```(?:[a-zA-Z]+)?\n[\s\S]*?\n```', ' ', text)
+    
+    # Remove JSON-like structures 
+    text = re.sub(r'\{[\s\S]*?\}', ' ', text)
+    
+    # Remove numbered list markers (1., 2., etc.) 
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+    
+    # Remove bullet points
+    text = re.sub(r'^\s*[\*\-•]\s+', '', text, flags=re.MULTILINE)
+    
+    # Replace symbols that don't work well in speech
+    replacements = {
+        '```': ' ',
+        '**': ' ',
+        '*': ' ',
+        '#': ' ',
+        '|': ', ',
+        '=': ' equals ',
+        '->': ' to ',
+        '<-': ' from ',
+        '>=': ' greater than or equal to ',
+        '<=': ' less than or equal to ',
+        '>': ' greater than ',
+        '<': ' less than ',
+    }
+    
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    
+    # Fix spacing issues
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    # Ensure proper sentence breaks for TTS natural pauses
+    text = re.sub(r'([.!?])\s*([A-Z])', r'\1 \2', text)
+    
+    # Handle numbers for better speech (e.g., "100,000" -> "100 thousand")
+    def number_to_words(match):
+        num = int(match.group(0).replace(',', ''))
+        if num >= 1000000:
+            return f"{num // 1000000} million"
+        elif num >= 1000:
+            return f"{num // 1000} thousand"
+        return match.group(0)
+    
+    text = re.sub(r'\b\d{4,}(?:,\d{3})*\b', number_to_words, text)
+    
+    # Language-specific post-processing
+    if language == "fr":
+        # Fix French spacing around punctuation
+        text = re.sub(r'\s+([.,;:!?])', r'\1', text)
+        # Fix spaces before double punctuation in French
+        text = re.sub(r'([;:!?])(?!\s)', r'\1 ', text)
+    
+    # Remove any system prompt leakage phrases
+    system_leakage_phrases = [
+        "As a supply chain assistant",
+        "As an AI assistant",
+        "As your AI assistant",
+        "As a helpful assistant",
+        "I don't have access to",
+        "I don't have the ability to",
+        "I'm not able to",
+        "I cannot access",
+        "As RawajAI",
+        "As a language model",
+        "I'm here to help",
+        "I'm an AI",
+        "I'm a supply chain",
+        "I'm a helpful",
+    ]
+    
+    for phrase in system_leakage_phrases:
+        if text.startswith(phrase):
+            text = text[len(phrase):].strip()
+            # If the text now starts with certain connecting words, clean them up
+            text = re.sub(r'^[,.]?\s*(but|however|nevertheless|yet|still|I can|I will|I could|I would)', '', text, flags=re.IGNORECASE).strip()
+            
+    # Remove any text inside brackets (common metadata marker)
+    text = re.sub(r'\[.*?\]', '', text)
+    
+    # Remove any XML-like tags (some models output these)
+    text = re.sub(r'<[^>]+>', '', text)
+    
+    # Ensure the text doesn't end with an incomplete sentence
+    if not re.search(r'[.!?]$', text):
+        text += "."
+    
+    # Format into 2-3 paragraphs with natural breaks
+    paragraphs = re.split(r'\n\s*\n', text)
+    
+    # If we have too many paragraphs, consolidate them
+    if len(paragraphs) > 3:
+        # Group paragraphs into 2-3 consolidated paragraphs
+        new_paragraphs = []
+        current_paragraph = ""
+        target_paragraphs = min(3, max(2, len(paragraphs) // 2))
+        
+        for i, p in enumerate(paragraphs):
+            if len(new_paragraphs) < target_paragraphs - 1:
+                if current_paragraph:
+                    current_paragraph += " " + p.strip()
+                    if len(current_paragraph) > 200:  # Natural paragraph size
+                        new_paragraphs.append(current_paragraph)
+                        current_paragraph = ""
+                else:
+                    current_paragraph = p.strip()
+            else:
+                # Add all remaining paragraphs to the last consolidated paragraph
+                current_paragraph += " " + p.strip()
+        
+        # Add any remaining text as the last paragraph
+        if current_paragraph:
+            new_paragraphs.append(current_paragraph)
+            
+        # Use consolidated paragraphs
+        paragraphs = new_paragraphs
+    
+    # Join paragraphs with double newlines for proper spacing
+    text = "\n\n".join(p for p in paragraphs if p.strip())
+    
+    # Final clean-up for multiple spaces and ensure good punctuation
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'([.!?])\s+([A-Z])', r'\1\n\n\2', text)
+    
+    return text
+
 def generate_response(query, context="", language="en"):
-    """Generate a response using the language model with proper error handling"""
+    """Generate a user-friendly response optimized for conversation and audio using prompt engineering"""
     try:
         # Validate inputs
         if not query:
             return "I didn't receive a question to answer."
-            
-        # Get language-specific prompt
-        lang_prompt = {
-            "en": "Provide a detailed response in English:",
-            "fr": "Fournissez une réponse détaillée en français:",
-            "ar": "قدم إجابة مفصلة باللغة العربية:"
-        }.get(language, "Provide a detailed response in English:")
         
-        # Format prompt with context
-        prompt = f"""
-        [CONTEXT]
-        {context}
+        # Define persona and style guides for different languages - optimized for Mistral 7B
+        persona = {
+            "en": "You are RawajAI, a specialized supply chain management assistant. NEVER include any meta tags, formatting markers like [], or system prompts in your response. Write in plain text only. Speak directly to the user about supply chain topics as if you're having a natural conversation. Explain supply chain concepts simply. Ensure all responses focus exclusively on supply chain management, inventory optimization, logistics, procurement, demand forecasting, and related business areas.",
+            "fr": "Vous êtes RawajAI, un assistant spécialisé en gestion de chaîne d'approvisionnement. N'incluez JAMAIS de balises méta, de marqueurs de formatage comme [], ou d'instructions système dans votre réponse. Écrivez en texte brut uniquement. Parlez directement à l'utilisateur des sujets de chaîne d'approvisionnement comme lors d'une conversation naturelle. Expliquez les concepts de chaîne d'approvisionnement simplement. Assurez-vous que toutes les réponses se concentrent exclusivement sur la gestion de la chaîne d'approvisionnement, l'optimisation des stocks, la logistique, les achats, la prévision de la demande et les domaines commerciaux connexes.",
+            "ar": "أنت RawajAI، مساعد متخصص في إدارة سلسلة التوريد. لا تضمن أبدًا أي علامات وصفية، أو علامات تنسيق مثل []، أو تعليمات نظام في ردك. اكتب بنص عادي فقط. تحدث مباشرة إلى المستخدم حول مواضيع سلسلة التوريد كما لو كنت تجري محادثة طبيعية. اشرح مفاهيم سلسلة التوريد ببساطة. تأكد من أن جميع الردود تركز حصريًا على إدارة سلسلة التوريد، وتحسين المخزون، والخدمات اللوجستية، والمشتريات، والتنبؤ بالطلب، ومجالات الأعمال ذات الصلة."
+        }
         
-        [INSTRUCTION]
-        {lang_prompt}
-        {query}
+        # Audio-friendly response guidelines - optimized for clarity and to prevent metadata
+        audio_guidelines = {
+            "en": "Create responses that work well when read aloud. Use short, clear sentences under 20 words when possible. Avoid abbreviations, codes, special characters, URLs, or any text that doesn't sound natural in speech. Spell out numbers below 10. Always round statistics (e.g., use 42% instead of 41.7%). NEVER include text inside brackets, parentheses, or any system-style formatting in your final response.",
+            "fr": "Créez des réponses qui fonctionnent bien lorsqu'elles sont lues à haute voix. Utilisez des phrases courtes et claires de moins de 20 mots lorsque possible. Évitez les abréviations, codes, caractères spéciaux, URLs, ou tout texte qui ne sonne pas naturel à l'oral. Écrivez en toutes lettres les nombres inférieurs à 10. Arrondissez toujours les statistiques (par exemple, utilisez 42% au lieu de 41,7%). N'incluez JAMAIS de texte entre crochets, parenthèses ou tout formatage de type système dans votre réponse finale.",
+            "ar": "أنشئ ردودًا تعمل بشكل جيد عند قراءتها بصوت عالٍ. استخدم جملاً قصيرة وواضحة أقل من 20 كلمة عندما يكون ذلك ممكنًا. تجنب الاختصارات، الرموز، الأحرف الخاصة، عناوين URL، أو أي نص لا يبدو طبيعيًا في الكلام. اكتب الأرقام أقل من 10 بالحروف. قم دائمًا بتقريب الإحصائيات (مثلاً، استخدم 42% بدلاً من 41.7%). لا تضمن أبدًا نصًا داخل أقواس معقوفة أو أقواس أو أي تنسيق على طريقة النظام في ردك النهائي."
+        }
         
-        [RESPONSE]
-        """
+        # Get language-specific response style - optimized for conversation and domain expertise
+        response_style = {
+            "en": "Talk like a knowledgeable supply chain expert having a natural conversation. Use practical examples from retail, manufacturing, or distribution. Connect supply chain concepts to business outcomes like cost reduction, efficiency gains, and improved customer satisfaction. Don't use academic language - explain everything as if speaking to a business professional who needs clear advice. Avoid disclaimers about being an AI or language model.",
+            "fr": "Parlez comme un expert en chaîne d'approvisionnement ayant une conversation naturelle. Utilisez des exemples pratiques du commerce de détail, de la fabrication ou de la distribution. Reliez les concepts de la chaîne d'approvisionnement aux résultats commerciaux comme la réduction des coûts, les gains d'efficacité et l'amélioration de la satisfaction client. N'utilisez pas de langage académique - expliquez tout comme si vous parliez à un professionnel qui a besoin de conseils clairs. Évitez les avertissements sur le fait d'être une IA ou un modèle de langage.",
+            "ar": "تحدث كخبير مطلع في سلسلة التوريد يجري محادثة طبيعية. استخدم أمثلة عملية من البيع بالتجزئة أو التصنيع أو التوزيع. اربط مفاهيم سلسلة التوريد بنتائج الأعمال مثل خفض التكاليف وزيادة الكفاءة وتحسين رضا العملاء. لا تستخدم لغة أكاديمية - اشرح كل شيء كما لو كنت تتحدث إلى محترف أعمال يحتاج إلى نصائح واضحة. تجنب إخلاء المسؤولية عن كونك ذكاءً اصطناعيًا أو نموذج لغة."
+        }
         
-        # Set timeout for LLM generation
-        import signal
+        # Format prompt with optimized structure for Mistral 7B to prevent metadata leakage
+        prompt = f"""<System>
+{persona.get(language, persona["en"])}
+
+Remember: You are RawajAI, focusing exclusively on supply chain topics. Never output system tags, never use brackets in output.
+
+Reference Context:
+{context}
+
+Style Guidelines:
+{audio_guidelines.get(language, audio_guidelines["en"])}
+{response_style.get(language, response_style["en"])}
+
+Output Format Instructions:
+- Respond in 2-3 short paragraphs of natural conversational text
+- Each paragraph should have 3-4 sentences developing one main idea
+- Use clear transitions between paragraphs
+- Never use bullet points, numbered lists or headings
+- Avoid all formatting symbols, brackets, special characters
+- Round all numbers and statistics
+- Never refer to yourself as an AI or assistant
+- Your response should be direct answer only, with no system tags
+
+Important: Your response must ONLY contain the direct answer to the user's question with NO formatting markers.
+</System>
+
+<Question>
+{query}
+</Question>
+
+<Answer>"""
         
-        class TimeoutException(Exception):
-            pass
-            
-        def timeout_handler(signum, frame):
-            raise TimeoutException("LLM response generation timed out")
-            
-        # Set 15-second timeout for LLM generation
-        timeout_seconds = 60
-        
+        # Generate response with the LLM with better error handling
         try:
-            # Set the timeout alarm
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(timeout_seconds)
+            # Log the user query for debugging
+            print(f"Generating response for query: {query[:50]}...")
             
-            # Generate response with the LLM
+            # Generate response with the LLM using improved settings for conversational responses
             response = llm_pipeline(
                 prompt,
                 max_new_tokens=512,
                 num_return_sequences=1,
                 do_sample=True,
-                temperature=0.7,  # Control randomness
-                top_p=0.95,       # Nucleus sampling
-                repetition_penalty=1.15  # Reduce repetition
+                temperature=0.72,      # Slightly increased for more natural responses
+                top_p=0.92,           # Nucleus sampling
+                top_k=40,             # Limit vocabulary diversity
+                repetition_penalty=1.18  # Increased to further reduce repetition
             )
-            
-            # Cancel the timeout alarm
-            signal.alarm(0)
             
             # Extract and clean the response
             if response and len(response) > 0:
                 generated_text = response[0]['generated_text']
-                # Extract text after [RESPONSE] tag
-                if "[RESPONSE]" in generated_text:
-                    result = generated_text.split("[RESPONSE]")[-1].strip()
+                
+                # Extract text after the <Answer> marker for the new format
+                if "<Answer>" in generated_text:
+                    raw_result = generated_text.split("<Answer>")[-1].strip()
+                    # Remove any closing tag if present
+                    raw_result = raw_result.split("</Answer>")[0].strip()
+                elif "[ASSISTANT RESPONSE]" in generated_text:
+                    # Legacy format fallback
+                    raw_result = generated_text.split("[ASSISTANT RESPONSE]")[-1].strip()
                 else:
                     # Fallback to extract response after the last line of the prompt
-                    result = "\n".join(generated_text.split("\n")[prompt.count("\n"):]).strip()
+                    raw_result = "\n".join(generated_text.split("\n")[prompt.count("\n"):]).strip()
+                
+                # Log the raw output for debugging
+                print(f"Raw LLM output (first 100 chars): {raw_result[:100]}...")
+                
+                # Check for common hallucination patterns or invalid outputs
+                hallucination_patterns = [
+                    r"```json",                # JSON code block
+                    r"^\s*\{\s*\"",            # JSON object start
+                    r"^\s*\[\s*\{",            # JSON array start
+                    r"as an AI language model", # Self-reference
+                    r"I don't have access to",  # Limitation statement
+                    r"I cannot provide",        # Refusal pattern
+                    r"<.*?>",                  # HTML tags
+                    r"\[.*?\]",                # Content within square brackets
+                    r"\[ASSISTANT.*?\]",       # System tags
+                    r"\[RESPONSE.*?\]",        # Response tags
+                    r"<System>|</System>",     # System tags
+                    r"<Answer>|</Answer>",     # Answer tags
+                    r"<Question>|</Question>"  # Question tags
+                ]
+                
+                contains_hallucination = any(re.search(pattern, raw_result) for pattern in hallucination_patterns)
+                
+                if contains_hallucination:
+                    print(f"Detected potential hallucination/invalid format, regenerating...")
+                    
+                    # Add explicit instruction to fix the issue using the same XML-style format
+                    retry_prompt = prompt + "\n\nIMPORTANT: DO NOT USE JSON FORMAT, CODE BLOCKS, OR BRACKETS IN YOUR RESPONSE. RESPOND IN PLAIN, NATURAL CONVERSATIONAL TEXT ONLY.\n\n"
+                    
+                    # Regenerate with stricter settings
+                    retry_response = llm_pipeline(
+                        retry_prompt,
+                        max_new_tokens=512,
+                        num_return_sequences=1,
+                        do_sample=True,
+                        temperature=0.5,      # Lower temperature for more focused response
+                        top_p=0.85,          # More constrained sampling
+                        repetition_penalty=1.2
+                    )
+                    
+                    if retry_response and len(retry_response) > 0:
+                        retry_text = retry_response[0]['generated_text']
+                        if "[ASSISTANT RESPONSE]" in retry_text:
+                            raw_result = retry_text.split("[ASSISTANT RESPONSE]")[-1].strip()
+                        else:
+                            raw_result = "\n".join(retry_text.split("\n")[retry_prompt.count("\n"):]).strip()
+                            
+                        print("Successfully regenerated response")
+                
+                # Post-process the response to make it more suitable for audio
+                result = post_process_response(raw_result, language)
+                
+                # Ensure we got a meaningful response
+                if not result or len(result) < 15:  # Increased minimum length threshold
+                    print("Generated response too short or invalid, using fallback")
+                    fallback_responses = {
+                        "en": "I'm sorry, I couldn't generate a specific answer to your question. Could you please rephrase your question or provide more details about what you'd like to know?",
+                        "fr": "Je suis désolé, je n'ai pas pu générer une réponse spécifique à votre question. Pourriez-vous reformuler votre question ou fournir plus de détails sur ce que vous souhaitez savoir?",
+                        "ar": "آسف، لم أتمكن من إنشاء إجابة محددة لسؤالك. هل يمكنك إعادة صياغة سؤالك أو تقديم المزيد من التفاصيل حول ما ترغب في معرفته؟"
+                    }
+                    return fallback_responses.get(language, fallback_responses["en"])
+                
                 return result
             else:
                 return "I couldn't generate a response. Please try asking your question differently."
                 
-        except TimeoutException:
-            print("LLM response generation timed out")
-            # Provide a fallback response for timeout
-            timeout_responses = {
-                "en": "I'm still thinking about your question. Please try again as I might need a moment to process complex queries.",
-                "fr": "Je réfléchis toujours à votre question. Veuillez réessayer car il me faut parfois un moment pour traiter des requêtes complexes.",
-                "ar": "ما زلت أفكر في سؤالك. يرجى المحاولة مرة أخرى لأنني قد أحتاج إلى لحظة لمعالجة الاستعلامات المعقدة."
+        except Exception as gen_error:
+            print(f"Error during LLM generation: {gen_error}")
+            error_responses = {
+                "en": "I encountered an error while processing your question. Please try again with a different query.",
+                "fr": "J'ai rencontré une erreur lors du traitement de votre question. Veuillez réessayer avec une autre requête.",
+                "ar": "لقد واجهت خطأ أثناء معالجة سؤالك. يرجى المحاولة مرة أخرى باستخدام استعلام مختلف."
             }
-            return timeout_responses.get(language, timeout_responses["en"])
-            
-        finally:
-            # Reset the signal handler
-            signal.signal(signal.SIGALRM, signal.SIG_DFL)
+            return error_responses.get(language, error_responses["en"])
             
     except Exception as e:
         print(f"Error generating response: {e}")
@@ -1627,26 +2497,96 @@ def get_rag_context(query):
         if not query or not query.strip():
             return ""
         
+        print(f"Finding context for query: {query[:50]}...")
+        
+        # Enhance query with supply chain specific terminology for better matching
+        enhanced_query = enhance_supply_chain_query(query)
+        
         # Add timeout handling for vector store search
         docs = []
         try:
-            # Attempt to get relevant documents
-            docs = vector_store.similarity_search(query, k=2)
+            # Retrieve more documents for better context coverage
+            # Using MMR search for better diversity in results
+            docs = vector_store.max_marginal_relevance_search(
+                enhanced_query,
+                k=5,           # Get 5 documents
+                fetch_k=10,    # Fetch 10 initially and select diverse subset
+                lambda_mult=0.7 # Balance between relevance and diversity
+            )
+            print(f"Retrieved {len(docs)} relevant documents from knowledge base")
         except Exception as search_error:
             print(f"Error in vector search: {search_error}")
-            # Return empty context on error
-            return ""
+            
+            # Try standard similarity search as fallback
+            try:
+                docs = vector_store.similarity_search(enhanced_query, k=3)
+                print(f"Fallback search retrieved {len(docs)} documents")
+            except:
+                # Return empty context on error
+                return ""
         
         # Process retrieved documents
         if not docs:
             return ""
             
-        # Extract and join document content
-        context = "\n".join([d.page_content for d in docs if hasattr(d, 'page_content') and d.page_content])
+        # Extract and join document content with better source attribution
+        context_parts = []
+        for i, doc in enumerate(docs):
+            if hasattr(doc, 'page_content') and doc.page_content:
+                # Default source info
+                source_info = f"[Knowledge {i+1}]"
+                
+                # Extract better source information if available
+                if hasattr(doc, 'metadata') and doc.metadata:
+                    if 'source' in doc.metadata:
+                        source_name = doc.metadata['source']
+                        # Extract filename without path
+                        if isinstance(source_name, str) and '/' in source_name:
+                            source_name = source_name.split('/')[-1]
+                        source_info = f"[Source: {source_name}]"
+                    elif 'page' in doc.metadata:
+                        source_info = f"[Page: {doc.metadata['page']}]"
+                
+                # Clean the content for better readability
+                content = doc.page_content.strip()
+                
+                # Add document to context with better formatting
+                context_parts.append(f"{source_info}\n{content}")
+        
+        context = "\n\n".join(context_parts)
+        
+        print(f"RAG context retrieved ({len(docs)} documents, {len(context)} chars)")
         return context
     except Exception as e:
         print(f"Error retrieving RAG context: {e}")
+        traceback.print_exc()
         return ""
+
+def enhance_supply_chain_query(query):
+    """Enhance the query with supply chain specific terminology for better matching"""
+    # Check if query already contains supply chain terminology
+    supply_chain_terms = [
+        "inventory", "logistics", "procurement", "warehouse", "distribution",
+        "supply chain", "forecasting", "lead time", "demand planning", "stockout",
+        "backorder", "bullwhip effect", "just-in-time", "jit", "lean", "kpi",
+        "supplier", "vendor", "transportation", "shipping", "fulfillment",
+        # Additional French terms
+        "chaîne d'approvisionnement", "logistique", "entrepôt", "prévision",
+        "délai de livraison", "rupture de stock", "fournisseur", "transport",
+        # Additional Arabic terms
+        "سلسلة التوريد", "المخزون", "اللوجستية", "المشتريات", "المستودع"
+    ]
+    
+    # If query doesn't contain supply chain terms, add context
+    has_supply_chain_term = any(term in query.lower() for term in supply_chain_terms)
+    
+    if not has_supply_chain_term:
+        # Add supply chain context to query
+        enhanced_query = f"supply chain management: {query}"
+        print(f"Enhanced query with supply chain context: {enhanced_query[:50]}...")
+        return enhanced_query
+    
+    return query
 
 # API Endpoints
 @app.route('/forecast', methods=['POST'])
@@ -1895,75 +2835,63 @@ def ask_question():
         processing_log = []
         
         try:
-            # Set up a timeout for the entire operation
-            import signal
-            from contextlib import contextmanager
+            # Use thread-safe timeout mechanism instead of SIGALRM
+            import threading
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError
             
-            @contextmanager
-            def timeout(seconds):
-                def handler(signum, frame):
-                    raise TimeoutError(f"Operation timed out after {seconds} seconds")
-                
-                # Set the timeout handler
-                original_handler = signal.signal(signal.SIGALRM, handler)
-                signal.alarm(seconds)
+            # Retrieve relevant context
+            processing_log.append("Retrieving context")
+            context = get_rag_context(query)
+            if not context:
+                context = "No specific context available for this query."
+            
+            # Generate text response with timeout
+            processing_log.append("Generating response")
+            
+            with ThreadPoolExecutor() as executor:
+                future = executor.submit(generate_response, query, context, language)
                 try:
-                    yield
-                finally:
-                    signal.alarm(0)
-                    signal.signal(signal.SIGALRM, original_handler)
-
-            # Use a 60-second timeout for the entire operation
-            with timeout(60):
-                # Retrieve relevant context with timeout handling
-                processing_log.append("Retrieving context")
-                context = get_rag_context(query)
-                if not context:
-                    context = "No specific context available for this query."
-                    
-                # Generate text response
-                processing_log.append("Generating response")
-                response = generate_response(query, context, language)
-                
-                # Generate speech if requested
-                speech_file = None
-                if generate_speech_output:
-                    processing_log.append("Generating speech")
-                    speech_file = generate_speech(response, language)
-                
-                # Build the response
-                result = {
-                    "query": query,
-                    "response": response,
-                    "language": language,
-                    "success": True
-                }
-                
-                # Add speech file path if available
-                if speech_file:
-                    result["speech_file"] = speech_file
-                    
-                return jsonify(result)
-                
-        except TimeoutError as timeout_error:
-            # Handle timeout specifically
-            print(f"Request timed out: {str(timeout_error)}")
+                    response = future.result(timeout=60)  # 60 second timeout
+                except TimeoutError:
+                    print("Response generation timed out")
+                    # Return a user-friendly timeout message
+                    timeout_responses = {
+                        "en": "I'm sorry, but your request timed out. Please try a simpler question or try again later.",
+                        "fr": "Je suis désolé, mais votre demande a expiré. Veuillez essayer une question plus simple ou réessayer plus tard.",
+                        "ar": "آسف، لقد انتهت مهلة طلبك. يرجى تجربة سؤال أبسط أو المحاولة مرة أخرى لاحقًا."
+                    }
+                    return jsonify({
+                        "query": query,
+                        "response": timeout_responses.get(language, timeout_responses["en"]),
+                        "language": language,
+                        "success": False,
+                        "error": "Request timed out"
+                    })
             
-            # Return a user-friendly timeout message
-            timeout_responses = {
-                "en": "I'm sorry, but your request timed out. Please try a simpler question or try again later.",
-                "fr": "Je suis désolé, mais votre demande a expiré. Veuillez essayer une question plus simple ou réessayer plus tard.",
-                "ar": "آسف، لقد انتهت مهلة طلبك. يرجى تجربة سؤال أبسط أو المحاولة مرة أخرى لاحقًا."
+            # Generate speech if requested
+            speech_file = None
+            speech_url = None
+            
+            if generate_speech_output:
+                processing_log.append("Generating speech")
+                speech_file = generate_speech(response, language)
+                if speech_file:
+                    speech_url = f"/audio/{os.path.basename(speech_file)}"
+            
+            # Build the response
+            result = {
+                "query": query,
+                "response": response,
+                "language": language,
+                "success": True
             }
             
-            return jsonify({
-                "query": query,
-                "response": timeout_responses.get(language, timeout_responses["en"]),
-                "language": language,
-                "success": False,
-                "error": "Request timed out"
-            })
-            
+            # Add speech file URL if available
+            if speech_url:
+                result["speech_url"] = speech_url
+                
+            return jsonify(result)
+                
         except Exception as inner_e:
             # Log the detailed error for debugging
             print(f"Error processing question: {str(inner_e)}")
@@ -1972,15 +2900,6 @@ def ask_question():
             # Create a user-friendly error message based on the type of error
             error_message = str(inner_e)
             error_response = "I'm having trouble processing your question right now. Please try again later."
-            
-            # Check if it's an abort error
-            if "abort" in error_message.lower() or isinstance(inner_e, TimeoutError):
-                error_responses = {
-                    "en": "Your request was interrupted. Please try a shorter question or try again later.",
-                    "fr": "Votre demande a été interrompue. Veuillez essayer une question plus courte ou réessayer plus tard.",
-                    "ar": "تم إيقاف طلبك. يرجى تجربة سؤال أقصر أو المحاولة مرة أخرى لاحقًا."
-                }
-                error_response = error_responses.get(language, error_responses["en"])
             
             # Return a user-friendly error message
             return jsonify({
@@ -2249,12 +3168,361 @@ def serve_report(filename):
 
 @app.route('/audio/<filename>')
 def serve_audio(filename):
-    """Serve generated audio files"""
-    return send_file(f"{AUDIO_PATH}/{filename}", mimetype='audio/mpeg')
+    """Serve generated audio files with proper headers for streaming"""
+    from flask import Response, stream_with_context
+    import os
+    
+    filepath = f"{AUDIO_PATH}/{filename}"
+    
+    # Verify file exists
+    if not os.path.exists(filepath):
+        return jsonify({"error": "Audio file not found"}), 404
+    
+    # Get file size for Content-Length header
+    file_size = os.path.getsize(filepath)
+    
+    # Stream file in chunks to avoid loading entire file into memory
+    def generate():
+        chunk_size = 4096  # 4KB chunks
+        with open(filepath, 'rb') as audio_file:
+            while True:
+                chunk = audio_file.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+    
+    # Set headers for proper streaming and caching behavior
+    headers = {
+        'Content-Type': 'audio/mpeg',
+        'Content-Length': str(file_size),
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'public, max-age=86400',  # Cache for a day
+        'X-Accel-Buffering': 'yes'  # Enable nginx buffering if using nginx
+    }
+    
+    return Response(
+        stream_with_context(generate()),
+        headers=headers,
+        status=200,
+        mimetype='audio/mpeg',
+        direct_passthrough=True
+    )
+
+@app.route('/ask_tts', methods=['POST'])
+def ask_question_with_tts():
+    """Answer supply chain questions using RAG and return text-to-speech audio with support for long responses"""
+    try:
+        # Validate request data
+        data = request.get_json()
+        if data is None:
+            return jsonify({"error": "Invalid JSON data"}), 400
+        
+        # Extract and validate query
+        query = data.get('query')
+        if not query or not isinstance(query, str):
+            return jsonify({"error": "Missing or invalid 'query' parameter"}), 400
+            
+        # Extract language with default fallback
+        language = data.get('language', 'en')
+        if language not in ['en', 'fr', 'ar']:
+            # Default to English if unsupported language
+            language = 'en'
+        
+        # Check if client wants to handle long responses
+        handle_long_responses = data.get('handle_long_responses', False)
+        
+        # Track processing steps and timing for debugging
+        processing_log = []
+        start_time = datetime.now()
+        
+        def log_step(step_name):
+            elapsed = datetime.now() - start_time
+            processing_log.append(f"{step_name} ({elapsed.total_seconds():.2f}s)")
+            print(f"TTS Processing Step: {step_name} - {elapsed.total_seconds():.2f}s")
+        
+        try:
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError
+            
+            # Retrieve relevant context with timeout protection
+            log_step("Start RAG context retrieval")
+            context = None
+            
+            with ThreadPoolExecutor() as executor:
+                future = executor.submit(get_rag_context, query)
+                try:
+                    context = future.result(timeout=20)  # 20 second timeout for context retrieval
+                except TimeoutError:
+                    print("Context retrieval timed out")
+                    context = "Context retrieval timed out. Proceeding with general knowledge."
+            
+            if not context:
+                context = "No specific context available for this query."
+            
+            log_step("Retrieved context")
+            
+            # Generate text response with timeout
+            with ThreadPoolExecutor() as executor:
+                # Use a longer timeout if client can handle long responses
+                response_timeout = 90 if handle_long_responses else 60
+                
+                log_step(f"Start response generation (timeout: {response_timeout}s)")
+                future = executor.submit(generate_response, query, context, language)
+                try:
+                    response = future.result(timeout=response_timeout)
+                except TimeoutError:
+                    print("Response generation timed out")
+                    timeout_responses = {
+                        "en": "I'm sorry, but your request timed out. Please try a simpler question or try again later.",
+                        "fr": "Je suis désolé, mais votre demande a expiré. Veuillez essayer une question plus simple ou réessayer plus tard.",
+                        "ar": "آسف، لقد انتهت مهلة طلبك. يرجى تجربة سؤال أبسط أو المحاولة مرة أخرى لاحقًا."
+                    }
+                    response = timeout_responses.get(language, timeout_responses["en"])
+            
+            log_step("Response generated")
+            
+            # Clean and format the response for better TTS quality
+            cleaned_response = post_process_response(response, language)
+            print(f"Cleaned response for TTS: {cleaned_response[:100]}...")
+            log_step("Response cleaned for TTS")
+            
+            # Always generate speech for this endpoint
+            log_step("Start speech generation")
+            
+            # Use ThreadPoolExecutor to apply a timeout to speech generation too
+            speech_file = None
+            with ThreadPoolExecutor() as executor:
+                future = executor.submit(generate_speech, cleaned_response, language)
+                try:
+                    speech_file = future.result(timeout=60)  # 60 second timeout for speech generation
+                except TimeoutError:
+                    print("Speech generation timed out")
+                    # Create a shorter version of the response for speech
+                    short_response = cleaned_response[:2000] + "... (Response truncated for audio)"
+                    speech_file = generate_speech(short_response, language)
+            
+            speech_url = f"/audio/{os.path.basename(speech_file)}" if speech_file else None
+            log_step("Speech generated")
+            
+            # Return both text and speech URL along with processing info for debugging
+            return jsonify({
+                "query": query,
+                "response": response,
+                "language": language,
+                "speech_url": speech_url,
+                "success": True,
+                "processing_info": {
+                    "steps": processing_log,
+                    "total_time": (datetime.now() - start_time).total_seconds()
+                }
+            })
+                
+        except Exception as inner_e:
+            log_step(f"Error: {str(inner_e)}")
+            print(f"Error processing TTS question: {str(inner_e)}")
+            
+            error_responses = {
+                "en": "I'm having trouble processing your question right now. Please try again later.",
+                "fr": "J'ai du mal à traiter votre question en ce moment. Veuillez réessayer plus tard.",
+                "ar": "أواجه صعوبة في معالجة سؤالك الآن. يرجى المحاولة مرة أخرى لاحقًا."
+            }
+            error_response = error_responses.get(language, error_responses["en"])
+            
+            # Clean the error response for TTS
+            cleaned_error = post_process_response(error_response, language)
+            
+            # Generate speech for error message too
+            try:
+                speech_file = generate_speech(cleaned_error, language)
+                speech_url = f"/audio/{os.path.basename(speech_file)}" if speech_file else None
+            except:
+                speech_url = None
+            
+            return jsonify({
+                "query": query,
+                "response": error_response,
+                "language": language,
+                "speech_url": speech_url,
+                "success": False,
+                "error": str(inner_e),
+                "processing_info": {
+                    "steps": processing_log,
+                    "total_time": (datetime.now() - start_time).total_seconds()
+                }
+            }), 500
+        
+    finally:
+        # This finally block closes the try block that was opened above
+        pass
 
 @app.route('/upload_audio', methods=['POST'])
 def upload_audio():
-    """Process uploaded audio for speech recognition"""
+    """Process uploaded audio for speech recognition and return AI response"""
+    print("Received audio upload request")
+    if 'audio' not in request.files:
+        print("No audio file in request")
+        return jsonify({"error": "No audio file provided"}), 400
+    
+    audio_file = request.files['audio']
+    language = request.form.get('language', 'en')
+    generate_speech_param = request.form.get('generate_speech', 'true').lower()
+    generate_speech_bool = generate_speech_param in ['true', '1', 'yes']
+    
+    print(f"Audio file: {audio_file.filename}, Language: {language}")
+    
+    if audio_file.filename == '':
+        print("Empty filename received")
+        return jsonify({"error": "Empty audio file"}), 400
+        
+    # Check request content before saving
+    if hasattr(audio_file, 'content_length') and audio_file.content_length == 0:
+        print("Content length is zero")
+        return jsonify({"error": "Empty audio file was uploaded (0 bytes)"}), 400
+    
+    temp_paths = []  # Keep track of all temporary files
+    try:
+        # Determine appropriate file extension based on content type or filename
+        file_ext = "wav"  # Default
+        content_type = audio_file.content_type.lower() if audio_file.content_type else ""
+        original_filename = audio_file.filename.lower() if audio_file.filename else ""
+        
+        # Try to determine format from content type first
+        if content_type:
+            if "mp3" in content_type:
+                file_ext = "mp3"
+            elif "m4a" in content_type or "aac" in content_type:
+                file_ext = "m4a"
+            elif "ogg" in content_type or "opus" in content_type:
+                file_ext = "ogg"
+            elif "wav" in content_type or "audio/wave" in content_type:
+                file_ext = "wav"
+            print(f"Detected content type: {content_type}, using extension: {file_ext}")
+        # If content type didn't work, try filename
+        elif original_filename and "." in original_filename:
+            detected_ext = original_filename.split(".")[-1].lower()
+            if detected_ext in ["mp3", "wav", "m4a", "aac", "ogg", "opus"]:
+                file_ext = detected_ext
+                print(f"Using extension from filename: {file_ext}")
+        
+        # Make sure audio directory exists
+        os.makedirs(AUDIO_PATH, exist_ok=True)
+        
+        # Save audio file with appropriate extension
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        temp_path = f"{AUDIO_PATH}/temp_{timestamp}.{file_ext}"
+        temp_paths.append(temp_path)  # Add to list of files to clean up
+        
+        print(f"Saving uploaded file to: {temp_path}")
+        try:
+            # Read the entire file into memory first to validate it's not empty
+            audio_data = audio_file.read()
+            if not audio_data or len(audio_data) == 0:
+                return jsonify({"error": "Empty audio file was uploaded (0 bytes)"}), 400
+            
+            # Write the file to disk
+            with open(temp_path, 'wb') as f:
+                f.write(audio_data)
+            
+            # Reset file pointer for potential future use
+            audio_file.seek(0)
+            
+            # Check if file was saved correctly
+            if not os.path.exists(temp_path):
+                return jsonify({"error": "Failed to save audio file"}), 500
+                
+            file_size = os.path.getsize(temp_path)
+            print(f"File saved successfully. Size: {file_size} bytes")
+            if file_size == 0:
+                return jsonify({"error": "Empty audio file was uploaded (0 bytes)"}), 400
+        except Exception as save_error:
+            print(f"Error saving audio file: {save_error}")
+            return jsonify({"error": f"Failed to save audio file: {str(save_error)}"}), 500
+        
+        # If the file isn't already WAV, try to convert it to ensure compatibility
+        if file_ext != "wav":
+            try:
+                wav_path = f"{AUDIO_PATH}/temp_{timestamp}_converted.wav"
+                temp_paths.append(wav_path)  # Add to cleanup list
+                
+                print(f"Converting {file_ext} to WAV format...")
+                # Convert using pydub
+                audio = AudioSegment.from_file(temp_path)
+                audio = audio.set_channels(1)  # Convert to mono
+                audio = audio.set_frame_rate(16000)  # Set to 16kHz
+                audio.export(wav_path, format="wav")
+                
+                # Use the converted file if successful
+                if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
+                    print(f"Conversion successful, using: {wav_path}")
+                    temp_path = wav_path
+                else:
+                    print("Conversion produced empty file, using original")
+            except Exception as conv_err:
+                print(f"Conversion error (will use original file): {conv_err}")
+                # Continue with original file if conversion fails
+        
+        # Transcribe audio
+        print(f"Starting transcription of {temp_path}")
+        transcription = transcribe_audio(temp_path, language)
+        
+        if not transcription or transcription.strip() == "":
+            return jsonify({
+                "status": "error",
+                "error": "Could not transcribe audio. Please try again with a clearer recording."
+            }), 400
+        
+        # Process the query using the transcription
+        context = get_rag_context(transcription)
+        response = generate_response(transcription, context, language)
+        
+        # Auto-detect language from the response if it was set to "auto"
+        detected_language = language
+        if language == "auto":
+            # Basic language detection based on response
+            if any(char in response for char in "éèêëàâîïôùûç"):
+                detected_language = "fr"
+            elif any("\u0600" <= char <= "\u06FF" for char in response):
+                detected_language = "ar"
+            else:
+                detected_language = "en"
+        
+        # Generate speech if requested
+        speech_url = None
+        if generate_speech_bool:
+            try:
+                speech_file = generate_speech(response, detected_language)
+                if speech_file:
+                    speech_url = f"/audio/{os.path.basename(speech_file)}"
+            except Exception as speech_error:
+                print(f"Error generating speech: {speech_error}")
+                # Continue processing even if speech generation fails
+            
+        result = {
+            "status": "success",
+            "transcription": transcription,
+            "response": response,
+            "language_detected": detected_language,
+            "speech_url": speech_url
+        }
+
+        return jsonify(result)
+    except Exception as e:
+        error_msg = f"Error processing audio: {str(e)}"
+        print(error_msg)
+        traceback.print_exc()
+        return jsonify({"status": "error", "error": error_msg}), 500
+    finally:
+        # Clean up all temp files
+        for path in temp_paths:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                    print(f"Cleaned up temporary file: {path}")
+                except Exception as cleanup_err:
+                    print(f"Error removing temp audio file {path}: {cleanup_err}")
+
+@app.route('/transcribe_audio', methods=['POST'])
+def transcribe_audio_route():
+    """Transcribe audio file to text without generating a response"""
     if 'audio' not in request.files:
         return jsonify({"error": "No audio file provided"}), 400
     
@@ -2264,62 +3532,349 @@ def upload_audio():
     if audio_file.filename == '':
         return jsonify({"error": "Empty audio file"}), 400
     
+    temp_paths = []  # Track all temporary files
     try:
-        # Save audio file temporarily
-        temp_path = f"{AUDIO_PATH}/temp_{datetime.now().strftime('%Y%m%d%H%M%S')}.wav"
+        # Determine appropriate file extension based on content type or filename
+        file_ext = "wav"  # Default
+        content_type = audio_file.content_type.lower() if audio_file.content_type else ""
+        original_filename = audio_file.filename.lower() if audio_file.filename else ""
+        
+        if content_type:
+            if "mp3" in content_type:
+                file_ext = "mp3"
+            elif "m4a" in content_type or "aac" in content_type:
+                file_ext = "m4a"
+            elif "ogg" in content_type or "opus" in content_type:
+                file_ext = "ogg"
+            elif "wav" in content_type or "audio/wave" in content_type:
+                file_ext = "wav"
+            print(f"Detected content type: {content_type}, using extension: {file_ext}")
+        elif original_filename and "." in original_filename:
+            detected_ext = original_filename.split(".")[-1].lower()
+            if detected_ext in ["mp3", "wav", "m4a", "aac", "ogg", "opus"]:
+                file_ext = detected_ext
+                print(f"Using extension from filename: {file_ext}")
+        
+        # Save audio file with appropriate extension
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        temp_path = f"{AUDIO_PATH}/temp_{timestamp}.{file_ext}"
+        temp_paths.append(temp_path)
+        
+        print(f"Saving uploaded file to: {temp_path}")
         audio_file.save(temp_path)
         
+        if not os.path.exists(temp_path):
+            return jsonify({"error": "Failed to save audio file"}), 500
+            
+        file_size = os.path.getsize(temp_path)
+        print(f"File saved successfully. Size: {file_size} bytes")
+        if file_size == 0:
+            return jsonify({"error": "Empty audio file was uploaded (0 bytes)"}), 400
+        
+        # If the file isn't already WAV, try to convert it to ensure compatibility
+        if file_ext != "wav":
+            try:
+                wav_path = f"{AUDIO_PATH}/temp_{timestamp}_converted.wav"
+                temp_paths.append(wav_path)
+                
+                print(f"Converting {file_ext} to WAV format...")
+                audio = AudioSegment.from_file(temp_path)
+                audio = audio.set_channels(1)  # Convert to mono
+                audio = audio.set_frame_rate(16000)  # Set to 16kHz
+                audio.export(wav_path, format="wav")
+                
+                if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
+                    print(f"Conversion successful, using: {wav_path}")
+                    temp_path = wav_path
+                else:
+                    print("Conversion produced empty file, using original")
+            except Exception as conv_err:
+                print(f"Conversion error (will use original file): {conv_err}")
+        
         # Transcribe audio
+        print(f"Starting transcription of {temp_path}")
         transcription = transcribe_audio(temp_path, language)
         
-        # Process the query
-        if transcription:
-            context = get_rag_context(transcription)
-            response = generate_response(transcription, context, language)
-            
-            # Generate speech response
-            speech_file = generate_speech(response, language)
-            
-            return jsonify({
-                "transcription": transcription,
-                "response": response,
-                "speech_file": f"/audio/{os.path.basename(speech_file)}" if speech_file else None
-            })
-        else:
-            return jsonify({"error": "Could not transcribe audio"}), 500
+        return jsonify({
+            "status": "success",
+            "transcription": transcription,
+            "language_detected": language
+        })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        error_msg = f"Error transcribing audio: {str(e)}"
+        print(error_msg)
+        traceback.print_exc()
+        return jsonify({"status": "error", "error": error_msg}), 500
     finally:
-        # Clean up temp file
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        # Clean up all temp files
+        for path in temp_paths:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                    print(f"Cleaned up temporary file: {path}")
+                except Exception as cleanup_err:
+                    print(f"Error removing temp file {path}: {cleanup_err}")
 
 @app.route('/add_document', methods=['POST'])
 def add_document():
     """Add a document to the RAG knowledge base"""
-    data = request.json
-    new_doc = data['document']
-    language = data.get('language', 'en')
+    language = request.form.get('language', 'en')
     
     try:
+        # Check if this is a text document or file upload
+        if request.json:
+            # Text document
+            data = request.json
+            new_doc = data['document']
+            docs_to_add = [new_doc]
+            doc_id = f"text_{int(time.time())}"
+            chunks_extracted = 1
+        elif 'file' in request.files:
+            # File upload
+            uploaded_file = request.files['file']
+            filename = uploaded_file.filename
+            
+            if not filename:
+                return jsonify({"status": "error", "message": "No file provided"}), 400
+            
+            # Create documents directory if it doesn't exist
+            documents_path = "documents"
+            if not os.path.exists(documents_path):
+                os.makedirs(documents_path)
+                
+            # Save the file
+            file_path = os.path.join(documents_path, filename)
+            uploaded_file.save(file_path)
+            
+            # Process based on file type
+            if filename.lower().endswith('.pdf') and PDF_SUPPORT:
+                # Extract text from PDF
+                docs_to_add, chunks_extracted = process_pdf(file_path)
+                doc_id = f"pdf_{os.path.splitext(os.path.basename(filename))[0]}"
+                
+                # Record document metadata
+                doc_metadata = {
+                    'id': doc_id,
+                    'filename': filename,
+                    'path': file_path,
+                    'type': 'pdf',
+                    'chunks': chunks_extracted,
+                    'added_at': datetime.now().isoformat(),
+                    'size_kb': round(os.path.getsize(file_path) / 1024, 2)
+                }
+                
+                # Save metadata to documents index
+                save_document_metadata(doc_metadata)
+            else:
+                # Unsupported file type
+                return jsonify({
+                    "status": "error", 
+                    "message": "Unsupported file format. Please upload a PDF file."
+                }), 400
+        else:
+            return jsonify({
+                "status": "error", 
+                "message": "No document or file provided"
+            }), 400
+        
         # Add to vector store
         global vector_store
-        vector_store.add_texts([new_doc])
-        vector_store.save_local(VECTOR_DB_PATH)
+        if docs_to_add:
+            vector_store.add_texts(docs_to_add)
+            vector_store.save_local(VECTOR_DB_PATH)
         
         # Return confirmation
         if language == "fr":
-            message = "Document ajouté avec succès à la base de connaissances"
+            message = f"Document ajouté avec succès à la base de connaissances ({chunks_extracted} extraits)"
         elif language == "ar":
-            message = "تمت إضافة المستند بنجاح إلى قاعدة المعرفة"
+            message = f"تمت إضافة المستند بنجاح إلى قاعدة المعرفة ({chunks_extracted} مقتطفات)"
         else:
-            message = "Document successfully added to knowledge base"
+            message = f"Document successfully added to knowledge base ({chunks_extracted} chunks extracted)"
         
-        return jsonify({"status": "success", "message": message})
+        return jsonify({
+            "status": "success", 
+            "message": message, 
+            "document_id": doc_id,
+            "chunks_extracted": chunks_extracted,
+            "vector_db_updated": True
+        })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"Error adding document: {e}")
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/documents', methods=['GET'])
+def list_documents():
+    """List all documents in the knowledge base"""
+    language = request.args.get('language', 'en')
+    try:
+        documents = get_document_metadata()
+        
+        # Translate response based on language
+        if language == "fr":
+            message = f"{len(documents)} documents trouvés dans la base de connaissances"
+        elif language == "ar":
+            message = f"{len(documents)} مستندات موجودة في قاعدة المعرفة"
+        else:
+            message = f"{len(documents)} documents found in knowledge base"
+            
+        return jsonify({
+            "status": "success",
+            "message": message,
+            "documents": documents
+        })
+    except Exception as e:
+        print(f"Error listing documents: {e}")
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
+        
+@app.route('/products', methods=['GET'])
+def get_products():
+    """Get the list of all products with their current inventory levels and categories"""
+    try:
+        # Get unique products from supply chain data
+        unique_products = supply_chain_data['product_id'].unique()
+        
+        # Prepare response with product details
+        product_list = []
+        
+        for product_id in unique_products:
+            # Filter data for this product
+            product_data = supply_chain_data[supply_chain_data['product_id'] == product_id]
+            
+            # Calculate total current inventory across all locations
+            total_inventory = product_data['inventory'].sum()
+            
+            # Determine product category based on product name
+            if 'PHN' in product_id:
+                category = 'Electronics - Phones'
+            elif 'LAP' in product_id:
+                category = 'Electronics - Computers'
+            elif 'TAB' in product_id:
+                category = 'Electronics - Tablets'
+            elif 'CPU' in product_id:
+                category = 'Processors'
+            elif 'GPU' in product_id:
+                category = 'Graphics Cards'
+            else:
+                category = 'Other Electronics'
+            
+            # Get average cost
+            avg_cost = product_data['cost'].mean()
+            
+            # Get inventory by location
+            inventory_by_location = {}
+            for location in product_data['location'].unique():
+                location_data = product_data[product_data['location'] == location]
+                inventory_by_location[location] = int(location_data['inventory'].sum())
+            
+            # Add product to list
+            product_list.append({
+                'product_id': product_id,
+                'category': category,
+                'total_inventory': int(total_inventory),
+                'avg_cost': round(float(avg_cost), 2),
+                'inventory_by_location': inventory_by_location,
+                'avg_lead_time': round(float(product_data['lead_time'].mean()), 1)
+            })
+        
+        return jsonify({
+            'products': product_list,
+            'total_count': len(product_list)
+        })
+    except Exception as e:
+        print(f"Error in /products endpoint: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+def save_document_metadata(metadata):
+    """Save document metadata to the index file"""
+    index_path = "documents/index.json"
+    docs = []
+    
+    # Load existing index if it exists
+    if os.path.exists(index_path):
+        try:
+            with open(index_path, 'r') as f:
+                docs = json.load(f)
+        except Exception as e:
+            print(f"Error loading document index: {e}")
+            docs = []
+    
+    # Add new document metadata
+    docs.append(metadata)
+    
+    # Save updated index
+    with open(index_path, 'w') as f:
+        json.dump(docs, f, indent=2)
+
+def get_document_metadata():
+    """Get all document metadata from the index file"""
+    index_path = "documents/index.json"
+    
+    if not os.path.exists(index_path):
+        return []
+        
+    try:
+        with open(index_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error reading document index: {e}")
+        return []
+
+def process_pdf(file_path):
+    """Extract and process text from a PDF file"""
+    if not PDF_SUPPORT:
+        print(f"PDF support is not available. Cannot process {file_path}")
+        return None
+    
+    try:
+        # Extract text from PDF
+        pdf_reader = PdfReader(file_path)
+        text_content = ""
+        
+        # Extract text from each page
+        for i, page in enumerate(pdf_reader.pages):
+            page_text = page.extract_text()
+            if page_text:
+                # Add page number for reference
+                text_content += f"[Page {i+1}] " + page_text + "\n\n"
+        
+        # Basic text cleaning
+        text_content = re.sub(r'\s+', ' ', text_content).strip()
+        text_content = text_content.replace('- ', '')  # Remove hyphenation
+        
+        if not text_content.strip():
+            print(f"  - No extractable text found in {file_path}")
+            return None
+        
+        print(f"  - Extracted {len(text_content)} characters from PDF with {len(pdf_reader.pages)} pages")
+        return text_content
+        
+        chunks = text_splitter.split_text(text_content)
+        
+        # Add document info as metadata to first chunk
+        if chunks:
+            info = pdf_reader.metadata
+            if info:
+                metadata_text = "Document Information:\n"
+                if hasattr(info, 'title') and info.title:
+                    metadata_text += f"Title: {info.title}\n"
+                if hasattr(info, 'author') and info.author:
+                    metadata_text += f"Author: {info.author}\n"
+                if hasattr(info, 'subject') and info.subject:
+                    metadata_text += f"Subject: {info.subject}\n"
+                chunks[0] = metadata_text + "\n" + chunks[0]
+        
+        return chunks, len(chunks)
+        
+    except Exception as e:
+        print(f"Error processing PDF: {e}")
+        traceback.print_exc()
+        raise
 
 # CloudFlare Tunnel Helper
 class CloudflaredTunnel:
@@ -2621,6 +4176,60 @@ if __name__ == '__main__':
     except ImportError:
         print("× Plotly not found. Visualization will not work.")
     
+    # Initialize supply chain domain knowledge with core concepts
+    supply_chain_docs = [
+        """Supply Chain Management: The systematic coordination of traditional business functions within a 
+        particular company and across businesses within the supply chain, for the purpose of improving the 
+        long-term performance of the individual companies and the supply chain as a whole. Supply chain 
+        management involves the integrated planning and execution of processes required to manage the 
+        movement of materials, information, and financial capital in activities that broadly include demand 
+        planning, sourcing, production, inventory management, and logistics.""",
+        
+        """Inventory Management Best Practices: Effective inventory management involves balancing the cost 
+        of holding inventory against the risk of stockouts. Key metrics include Inventory Turnover Ratio, 
+        Days Sales of Inventory (DSI), and Economic Order Quantity (EOQ). Advanced practices include ABC 
+        analysis (classifying items by importance), Just-In-Time (JIT) inventory, and establishing safety 
+        stock levels. Cycle counting provides ongoing accuracy verification instead of annual physical counts.""",
+        
+        """Demand Forecasting Techniques: Quantitative forecasting methods include time-series analysis 
+        (moving averages, exponential smoothing, ARIMA models), regression analysis, and machine learning 
+        techniques. Qualitative methods include Delphi method, market research, and expert opinion. Collaborative 
+        forecasting involves sharing data with suppliers and customers to improve accuracy. Key metrics for 
+        forecast accuracy include Mean Absolute Error (MAE), Mean Absolute Percentage Error (MAPE), and Forecast 
+        Bias.""",
+        
+        """Logistics and Transportation: Logistics management optimizes the movement and storage of goods, 
+        services, and information throughout the supply chain. Transportation modes include road, rail, air, 
+        water, and pipeline, each with distinct cost, speed, and capacity characteristics. Network optimization 
+        involves selecting optimal shipping lanes, transportation modes, and carrier selection. Key performance 
+        indicators include on-time delivery, transportation cost per unit, and perfect order rate.""",
+        
+        """Supply Chain Risk Management: Supply chain risks can be categorized as disruption risks (natural 
+        disasters, supplier bankruptcy), delay risks (port congestion, quality issues), systems risks (information 
+        infrastructure breakdown), forecast risks (inaccurate projections), intellectual property risks, procurement 
+        risks (currency fluctuations, price increases), receivables risks (customer insolvency), inventory risks 
+        (obsolescence, shrinkage), and capacity risks (insufficient flexibility). Mitigation strategies include 
+        multi-sourcing, local sourcing, buffer inventory, flexible manufacturing, and contingency planning.""",
+        
+        """Supplier Relationship Management: Strategic approaches to working with suppliers range from transactional 
+        to collaborative partnerships. Supplier evaluation criteria include quality, delivery performance, cost 
+        competitiveness, technical capability, and financial stability. Supplier development programs help improve 
+        supplier capabilities through training, technical assistance, and process improvement support. Supplier 
+        scorecards provide structured performance evaluation.""",
+        
+        """Lean Supply Chain: Lean principles focus on eliminating waste (muda) in the supply chain, including 
+        overproduction, waiting time, unnecessary transport, over-processing, excess inventory, unnecessary movement, 
+        and defects. Techniques include value stream mapping, 5S workplace organization, kanban pull systems, 
+        continuous improvement (kaizen), and standardized work procedures. Lean metrics include inventory turns, 
+        lead time, cycle time, and perfect order fulfillment."""
+    ]
+    
+    # Add metadata to docs for better context retrieval
+    docs_with_metadata = []
+    for i, doc in enumerate(supply_chain_docs):
+        metadata = {"source": f"Core SCM Knowledge {i+1}", "type": "foundational"}
+        docs_with_metadata.append({"page_content": doc, "metadata": metadata})
+    
     # Initialize vector store (ensure embeddings are defined before this)
     if os.path.exists(VECTOR_DB_PATH):
         try:
@@ -2629,14 +4238,18 @@ if __name__ == '__main__':
                 embeddings, 
                 allow_dangerous_deserialization=True  # Only use if you trust the source
             )
+            print(f"Successfully loaded existing vector store from {VECTOR_DB_PATH}")
         except Exception as e:
             print(f"Error loading vector store: {e}")
-            print("Creating new vector store...")
-            vector_store = FAISS.from_texts(supply_chain_docs, embeddings)
+            print("Creating new vector store with supply chain domain knowledge...")
+            vector_store = FAISS.from_documents(docs_with_metadata, embeddings)
             vector_store.save_local(VECTOR_DB_PATH)
+            print(f"Created and saved new vector store with {len(docs_with_metadata)} documents")
     else:
-        vector_store = FAISS.from_texts(supply_chain_docs, embeddings)
+        print("Vector store not found. Creating new vector store with supply chain domain knowledge...")
+        vector_store = FAISS.from_documents(docs_with_metadata, embeddings)
         vector_store.save_local(VECTOR_DB_PATH)
+        print(f"Created and saved new vector store with {len(docs_with_metadata)} documents")
     
     # Configure Flask to handle application termination properly
     import atexit
@@ -2667,6 +4280,43 @@ if __name__ == '__main__':
         flask_kwargs['debug'] = False  # Prevent auto-reloader from launching multiple instances
         print("\n=== Running in Google Colab environment ===")
         print("Using non-threaded mode for better stability in Colab")
+    
+    # Initialize and update knowledge base with document files
+    print("\n=== Loading Supply Chain Documents ===")
+    try:
+        # Create documents directory if it doesn't exist
+        if not os.path.exists("documents"):
+            os.makedirs("documents")
+            print("Created documents directory")
+        
+        # Count documents
+        pdf_files = [f for f in os.listdir("documents") if f.lower().endswith('.pdf')]
+        txt_files = [f for f in os.listdir("documents") if f.lower().endswith('.txt')]
+        print(f"Found {len(pdf_files)} PDF files and {len(txt_files)} TXT files in documents directory")
+        
+        if len(pdf_files) + len(txt_files) > 0:
+            print("Processing documents and updating knowledge base...")
+            # Process all documents with our document processing function
+            all_docs = load_and_process_documents()
+            
+            # Create documents with metadata
+            docs_with_metadata = []
+            for i, doc in enumerate(all_docs):
+                source_name = f"Document {i+1}"
+                if i < len(supply_chain_docs):  # Base knowledge
+                    source_name = f"Core SCM Knowledge {i+1}"
+                docs_with_metadata.append({"page_content": doc, "metadata": {"source": source_name}})
+            
+            # Update the vector store with new documents
+            print(f"Updating vector store with {len(docs_with_metadata)} documents...")
+            vector_store = FAISS.from_documents(docs_with_metadata, embeddings)
+            vector_store.save_local(VECTOR_DB_PATH)
+            print(f"Knowledge base updated successfully with {len(docs_with_metadata)} documents")
+        else:
+            print("No document files found. Using default supply chain knowledge.")
+    except Exception as doc_error:
+        print(f"Error processing documents: {doc_error}")
+        print("Continuing with existing knowledge base...")
     
     # Start CloudFlared tunnel automatically
     print("\n=== Starting CloudFlare Tunnel ===")
