@@ -87,7 +87,7 @@ app = Flask(__name__)
 CORS(app) 
 
 # Configuration
-os.environ["HF_TOKEN"] = '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'
+os.environ["HF_TOKEN"] = ''
 MODEL_NAME = "mistralai/Mistral-7B-v0.1"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 WHISPER_MODEL = "openai/whisper-medium"
