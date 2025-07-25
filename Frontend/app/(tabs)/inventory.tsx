@@ -398,63 +398,6 @@ export default function InventoryScreen() {
         />
       </Card>
       
-      {/* Results */}
-      {optimizationData && (
-        <Card style={styles.resultsCard}>
-          <ThemedText type="subtitle">Optimization Results</ThemedText>
-          
-          <View style={styles.resultRow}>
-            <ThemedText style={styles.resultLabel}>Economic Order Quantity:</ThemedText>
-            <ThemedText style={styles.resultValue}>
-              {optimizationData.eoq?.toFixed(2) || '-'} units
-            </ThemedText>
-          </View>
-          
-          <View style={styles.resultRow}>
-            <ThemedText style={styles.resultLabel}>Reorder Point:</ThemedText>
-            <ThemedText style={styles.resultValue}>
-              {optimizationData.reorder_point?.toFixed(2) || '-'} units
-            </ThemedText>
-          </View>
-          
-          <View style={styles.resultRow}>
-            <ThemedText style={styles.resultLabel}>Safety Stock:</ThemedText>
-            <ThemedText style={styles.resultValue}>
-              {optimizationData.safety_stock?.toFixed(2) || '-'} units
-            </ThemedText>
-          </View>
-          
-          <View style={styles.resultRow}>
-            <ThemedText style={styles.resultLabel}>Total Cost:</ThemedText>
-            <ThemedText style={styles.resultValue}>
-              ${optimizationData.total_cost?.toFixed(2) || '-'}
-            </ThemedText>
-          </View>
-          
-          {optimizationData.recommendations && (
-            <>
-              <View style={styles.recommendationDivider} />
-              <ThemedText type="subtitle" style={{marginVertical: 10}}>Recommendations</ThemedText>
-              {typeof optimizationData.recommendations === 'string' ? (
-                optimizationData.recommendations.split('\n').map((rec, index) => (
-                  <View key={index} style={styles.recommendationItem}>
-                    <ThemedText style={styles.bulletPoint}>•</ThemedText>
-                    <ThemedText style={styles.recommendationText}>{rec}</ThemedText>
-                  </View>
-                ))
-              ) : Array.isArray(optimizationData.recommendations) ? (
-                optimizationData.recommendations.map((rec, index) => (
-                  <View key={index} style={styles.recommendationItem}>
-                    <ThemedText style={styles.bulletPoint}>•</ThemedText>
-                    <ThemedText style={styles.recommendationText}>{rec}</ThemedText>
-                  </View>
-                ))
-              ) : null}
-            </>
-          )}
-        </Card>
-      )}
-      
       {/* Optimization Results */}
       {optimizationData && !loading && (
         <Card style={styles.resultsCard}>
@@ -489,6 +432,33 @@ export default function InventoryScreen() {
               </ThemedText>
             </View>
           </View>
+          
+          {/* Recommendations Section */}
+          {optimizationData.recommendations && (
+            <View style={styles.recommendationsContainer}>
+              <ThemedText style={styles.recommendationsTitle}>Recommendations</ThemedText>
+              
+              <View style={styles.recommendationsList}>
+                {typeof optimizationData.recommendations === 'string' ? (
+                  optimizationData.recommendations.split('\n').map((recommendation, index) => (
+                    <View key={index} style={styles.recommendationItem}>
+                      <ThemedText style={styles.recommendationText}>
+                        • {recommendation.trim()}
+                      </ThemedText>
+                    </View>
+                  ))
+                ) : Array.isArray(optimizationData.recommendations) ? (
+                  optimizationData.recommendations.map((recommendation, index) => (
+                    <View key={index} style={styles.recommendationItem}>
+                      <ThemedText style={styles.recommendationText}>
+                        • {recommendation}
+                      </ThemedText>
+                    </View>
+                  ))
+                ) : null}
+              </View>
+            </View>
+          )}
         </Card>
       )}
       
@@ -792,6 +762,20 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontStyle: 'italic',
   },
+  recommendationsContainer: {
+    marginTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(150,150,150,0.2)',
+    paddingTop: 16,
+  },
+  recommendationsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  recommendationsList: {
+    marginTop: 8,
+  },
   recommendationDivider: {
     height: 1,
     backgroundColor: 'rgba(150,150,150,0.2)',
@@ -799,8 +783,9 @@ const styles = StyleSheet.create({
   },
   recommendationItem: {
     flexDirection: 'row',
-    marginBottom: 8,
+    marginBottom: 12,
     paddingRight: 10,
+    alignItems: 'flex-start',
   },
   bulletPoint: {
     marginRight: 8,
