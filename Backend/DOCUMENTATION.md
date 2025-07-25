@@ -73,7 +73,7 @@ pytrends, faiss-cpu, pypdf, langchain_text_splitters, langchain_core
 The system uses several environment variables and configuration constants:
 
 ```python
-os.environ["HF_TOKEN"] = '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'
+
 MODEL_NAME = "mistralai/Mistral-7B-v0.1"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 WHISPER_MODEL = "openai/whisper-medium"
