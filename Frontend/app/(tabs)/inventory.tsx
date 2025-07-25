@@ -204,9 +204,6 @@ export default function InventoryScreen() {
   );
 }
 
-// Inventory Item Component
-
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
