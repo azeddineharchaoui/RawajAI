@@ -5,19 +5,17 @@ import { Stack } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
+import InventoryItem from '@/components/Inventory/InventoryItem';
 import { api } from '@/services/apiClient';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-// Using IconSymbol for inventory item status icons
-import { IconSymbol } from '@/components/ui/IconSymbol';
-import { WebView } from 'react-native-webview';
+
+import OptimizeInventorySection from '@/components/Inventory/RenderOptimizeContent';
 
 export default function InventoryScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  
+
   const [productId, setProductId] = useState('');
   const [holdingCost, setHoldingCost] = useState('10');
   const [orderingCost, setOrderingCost] = useState('100');
@@ -41,10 +39,10 @@ export default function InventoryScreen() {
       setError('Please enter a product ID');
       return;
     }
-    
+
     setLoading(true);
     setError('');
-    
+
     try {
       const response = await api.optimizeInventory({
         forecast_data: [], // This would come from a previous forecast
@@ -54,9 +52,9 @@ export default function InventoryScreen() {
         lead_time: parseInt(leadTime) || 7,
         service_level: parseFloat(serviceLevel) || 0.95,
       });
-      
+
       setOptimizationData(response);
-      
+
       // If we have chart data, create a simple plot
       if (response.chart_data) {
         const htmlContent = generatePlotHtml(response.chart_data);
@@ -104,15 +102,42 @@ export default function InventoryScreen() {
       </html>
     `;
   };
+  //  Fake inventory items for demonstration
+  interface InventoryItemType {
+    id: string;
+    name: string;
+    quantity: number;
+    status: 'ok' | 'low' | 'out';
+  }
+  const fakeInventoryItems: InventoryItemType[] = [
+    {
+      id: 'SKU-1001',
+      name: 'Product A',
+      quantity: 120,
+      status: 'ok',
+    },
+    {
+      id: 'SKU-1002',
+      name: 'Product B',
+      quantity: 42,
+      status: 'low',
+    },
+    {
+      id: 'SKU-1003',
+      name: 'Product C',
+      quantity: 0,
+      status: 'out',
+    },
+  ];
 
   const renderTabs = () => (
     <View style={styles.tabContainer}>
       <TouchableOpacity
         style={[styles.tab, activeTab === 'optimize' && styles.activeTab]}
         onPress={() => setActiveTab('optimize')}>
-        <ThemedText 
+        <ThemedText
           style={[
-            styles.tabText, 
+            styles.tabText,
             activeTab === 'optimize' && styles.activeTabText
           ]}>
           Optimize
@@ -121,9 +146,9 @@ export default function InventoryScreen() {
       <TouchableOpacity
         style={[styles.tab, activeTab === 'view' && styles.activeTab]}
         onPress={() => setActiveTab('view')}>
-        <ThemedText 
+        <ThemedText
           style={[
-            styles.tabText, 
+            styles.tabText,
             activeTab === 'view' && styles.activeTabText
           ]}>
           Current Stock
@@ -132,171 +157,25 @@ export default function InventoryScreen() {
     </View>
   );
 
-  const renderOptimizeContent = () => (
-    <>
-      <Card style={styles.formCard}>
-        <Input
-          label="Product ID"
-          placeholder="Enter product ID"
-          value={productId}
-          onChangeText={setProductId}
-          containerStyle={styles.input}
-        />
-        
-        <View style={styles.rowInputs}>
-          <View style={styles.halfInput}>
-            <Input
-              label="Holding Cost"
-              placeholder="10"
-              value={holdingCost}
-              onChangeText={setHoldingCost}
-              keyboardType="numeric"
-              containerStyle={styles.input}
-            />
-          </View>
-          <View style={styles.halfInput}>
-            <Input
-              label="Ordering Cost"
-              placeholder="100"
-              value={orderingCost}
-              onChangeText={setOrderingCost}
-              keyboardType="numeric"
-              containerStyle={styles.input}
-            />
-          </View>
-        </View>
-        
-        <View style={styles.rowInputs}>
-          <View style={styles.halfInput}>
-            <Input
-              label="Lead Time (days)"
-              placeholder="7"
-              value={leadTime}
-              onChangeText={setLeadTime}
-              keyboardType="numeric"
-              containerStyle={styles.input}
-            />
-          </View>
-          <View style={styles.halfInput}>
-            <Input
-              label="Service Level (0-1)"
-              placeholder="0.95"
-              value={serviceLevel}
-              onChangeText={setServiceLevel}
-              keyboardType="numeric"
-              containerStyle={styles.input}
-            />
-          </View>
-        </View>
-        
-        {error ? <ThemedText style={styles.errorText}>{error}</ThemedText> : null}
-        
-        <Button
-          text="Optimize Inventory"
-          onPress={optimizeInventory}
-          loading={loading}
-          fullWidth
-        />
-      </Card>
-      
-      {/* Results */}
-      {optimizationData && (
-        <Card style={styles.resultsCard}>
-          <ThemedText type="subtitle">Optimization Results</ThemedText>
-          
-          <View style={styles.resultRow}>
-            <ThemedText style={styles.resultLabel}>Economic Order Quantity:</ThemedText>
-            <ThemedText style={styles.resultValue}>
-              {optimizationData.eoq?.toFixed(2) || '-'} units
-            </ThemedText>
-          </View>
-          
-          <View style={styles.resultRow}>
-            <ThemedText style={styles.resultLabel}>Reorder Point:</ThemedText>
-            <ThemedText style={styles.resultValue}>
-              {optimizationData.reorder_point?.toFixed(2) || '-'} units
-            </ThemedText>
-          </View>
-          
-          <View style={styles.resultRow}>
-            <ThemedText style={styles.resultLabel}>Safety Stock:</ThemedText>
-            <ThemedText style={styles.resultValue}>
-              {optimizationData.safety_stock?.toFixed(2) || '-'} units
-            </ThemedText>
-          </View>
-          
-          <View style={styles.resultRow}>
-            <ThemedText style={styles.resultLabel}>Total Cost:</ThemedText>
-            <ThemedText style={styles.resultValue}>
-              ${optimizationData.total_cost?.toFixed(2) || '-'}
-            </ThemedText>
-          </View>
-        </Card>
-      )}
-      
-      {/* Chart visualization */}
-      {plotHtml ? (
-        <Card style={styles.chartCard}>
-          <ThemedText type="subtitle">Inventory Level Projection</ThemedText>
-          <View style={styles.chartContainer}>
-            <WebView
-              source={{ html: plotHtml }}
-              style={styles.webView}
-              scrollEnabled={false}
-              javaScriptEnabled={true}
-              domStorageEnabled={true}
-              onError={(e) => console.error('WebView error:', e.nativeEvent)}
-              renderError={(errorName) => (
-                <View style={styles.errorContainer}>
-                  <ThemedText style={styles.errorText}>Error loading chart: {errorName}</ThemedText>
-                </View>
-              )}
-            />
-          </View>
-        </Card>
-      ) : null}
-    </>
-  );
-  
-  const renderViewContent = () => (
+
+  const renderViewContent = (item: InventoryItemType[]) => (
     <Card style={styles.inventoryCard}>
       <ThemedText type="subtitle">Current Inventory</ThemedText>
-      
+
       {loading ? (
         <ActivityIndicator size="large" color={colors.tint} style={styles.loader} />
       ) : (
         <View style={styles.inventoryList}>
           {/* This would be populated from an API call to get inventory */}
-          <InventoryItem 
-            id="SKU-1001" 
-            name="Product A" 
-            quantity={256} 
-            status="ok" 
-          />
-          <InventoryItem 
-            id="SKU-1002" 
-            name="Product B" 
-            quantity={42} 
-            status="low" 
-          />
-          <InventoryItem 
-            id="SKU-1003" 
-            name="Product C" 
-            quantity={0} 
-            status="out" 
-          />
-          <InventoryItem 
-            id="SKU-1004" 
-            name="Product D" 
-            quantity={128} 
-            status="ok" 
-          />
-          <InventoryItem 
-            id="SKU-1005" 
-            name="Product E" 
-            quantity={18} 
-            status="low" 
-          />
+          {item.map((item) => (
+            <InventoryItem
+              key={item.id}
+              id={item.id}
+              name={item.name}
+              quantity={item.quantity}
+              status={item.status}
+            />
+          ))}
         </View>
       )}
     </Card>
@@ -305,61 +184,28 @@ export default function InventoryScreen() {
   return (
     <ThemedView style={styles.container}>
       <Stack.Screen options={{ title: "Inventory Management", headerShown: true }} />
-      
+
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
         <ThemedText type="subtitle">Inventory Optimization</ThemedText>
-        
+
         {renderTabs()}
-        
-        {activeTab === 'optimize' ? renderOptimizeContent() : renderViewContent()}
+
+        {activeTab === 'optimize' ? <OptimizeInventorySection productId={productId} holdingCost={holdingCost} orderingCost={orderingCost} leadTime={leadTime} serviceLevel={serviceLevel} error={error} loading={loading} plotHtml={plotHtml} optimizationData={optimizationData}
+          setProductId={setProductId}
+          setHoldingCost={setHoldingCost}
+          setOrderingCost={setOrderingCost}
+          setLeadTime={setLeadTime}
+          setServiceLevel={setServiceLevel}
+          optimizeInventory={() => optimizeInventory()}
+          // used fake data for demonstration
+        /> : renderViewContent(fakeInventoryItems)}
       </ScrollView>
     </ThemedView>
   );
 }
 
 // Inventory Item Component
-const InventoryItem = ({ id, name, quantity, status }: { 
-  id: string;
-  name: string;
-  quantity: number;
-  status: 'ok' | 'low' | 'out';
-}) => {
-  const statusColors = {
-    ok: '#38A169', // green
-    low: '#DD6B20', // orange
-    out: '#E53E3E', // red
-  };
-  
-  const statusLabels = {
-    ok: 'In Stock',
-    low: 'Low Stock',
-    out: 'Out of Stock',
-  };
 
-  const statusIcons: Record<string, any> = {
-    ok: "checkmark.circle.fill",
-    low: "exclamationmark.circle.fill",
-    out: "xmark.circle.fill",
-  };
-  
-  return (
-    <View style={styles.inventoryItem}>
-      <View style={styles.itemContent}>
-        <ThemedText style={styles.itemName}>{name}</ThemedText>
-        <ThemedText style={styles.itemId}>{id}</ThemedText>
-      </View>
-      <View style={styles.itemContent}>
-        <ThemedText style={styles.itemQuantity}>{quantity}</ThemedText>
-        <View style={[styles.itemStatus, { backgroundColor: statusColors[status] + '20' }]}>
-          <IconSymbol size={12} name={statusIcons[status]} color={statusColors[status]} />
-          <ThemedText style={[styles.itemStatusText, { color: statusColors[status] }]}>
-            {statusLabels[status]}
-          </ThemedText>
-        </View>
-      </View>
-    </View>
-  );
-};
 
 const styles = StyleSheet.create({
   container: {

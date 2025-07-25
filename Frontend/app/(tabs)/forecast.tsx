@@ -281,14 +281,17 @@ export default function ForecastScreen() {
                   borderWidth: 1,
                   borderColor: colorScheme === 'dark' ? '#1E40AF' : '#60A5FA',
                 }}
-                textStyle={{
-                  color: colorScheme === 'dark' ? '#ffffff' : '#f0f9ff',
-                  fontWeight: '600',
-                  fontSize: 16,
-                }}
-
-                onPress={() => console.log('Generate report for:', productId)}>
-                Generate PDF Report
+                onPress={() => console.log('Generate report for:', productId)}
+              >
+                <Text
+                  style={{
+                    color: colorScheme === 'dark' ? '#ffffffff' : '#f0f9ff',
+                    fontWeight: '600',
+                    fontSize: 16,
+                  }}
+                >
+                  Generate PDF Report
+                </Text>
               </Button>
             </Card>
           </View>
