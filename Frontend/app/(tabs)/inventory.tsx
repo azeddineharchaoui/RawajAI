@@ -71,6 +71,8 @@ export default function InventoryScreen() {
       setProductsLoading(true);
       const response = await api.getProducts() as ProductsResponse;
       if (response && response.products) {
+        console.log(response.products);
+        
         setProducts(response.products);
       }
     } catch (error) {
@@ -206,7 +208,7 @@ export default function InventoryScreen() {
 
 
 
-  const renderViewContent = (item: InventoryItemType[]) => (
+  const renderViewContent = () => (
     <Card style={styles.inventoryCard}>
       <ThemedText type="subtitle">Current Inventory</ThemedText>
       
@@ -215,14 +217,8 @@ export default function InventoryScreen() {
       ) : (
         <View style={styles.inventoryList}>
           {/* This would be populated from an API call to get inventory */}
-          {item.length > 0 ? item.map((inventoryItem) => (
-            <InventoryItem
-              key={inventoryItem.id}
-              id={inventoryItem.id}
-              name={inventoryItem.name}
-              quantity={inventoryItem.quantity}
-              status={inventoryItem.status}
-            />
+          {products.length > 0 ? products.map((inventoryItem) => (
+            <InventoryItem product={inventoryItem}/>
           )) : (
             <ThemedText style={styles.noDataText}>No inventory items found.</ThemedText>
           )}
@@ -257,7 +253,7 @@ export default function InventoryScreen() {
           setServiceLevel={setServiceLevel}
           optimizeInventory={() => optimizeInventory()}
           // used fake data for demonstration
-        /> : renderViewContent(fakeInventoryItems)}
+        /> : renderViewContent()}
       </ScrollView>
     </ThemedView>
   );
