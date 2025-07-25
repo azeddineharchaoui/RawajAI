@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 // Default API URL - for local dev testing
-const DEFAULT_API_URL = 'https://parliament-canal-drinks-planets.trycloudflare.com';
+const DEFAULT_API_URL = 'https://cooked-cartridges-thoroughly-chick.trycloudflare.com';
 const API_URL = Constants.expoConfig?.extra?.apiUrl || DEFAULT_API_URL;
 const TUNNEL_KEY = 'tunnel_url'; // Must be a simple string key for SecureStore
 
@@ -274,6 +274,7 @@ export class ApiClient {
         demand_forecast: demand_forecast,
         product_id: data.product_id,
         holding_costs: { [data.product_id]: data.holding_cost },
+        ordering_cost: data.ordering_cost, // Include ordering cost
         service_level: data.service_level,
         lead_times: { [data.product_id]: data.lead_time },
         language: data.language || 'en'
@@ -289,32 +290,67 @@ export class ApiClient {
           return this.getMockInventoryData(data.product_id);
         }
         
-        // Next, check if optimization_results exists
-        if (!result.optimization_results) {
-          console.warn("API didn't return optimization_results, using mock data");
-          return this.getMockInventoryData(data.product_id);
-        }
-        
-        // Finally, check if locations exists
-        if (!result.optimization_results.locations) {
-          console.warn("API returned optimization_results but no locations property, enhancing result");
+        // Transform the backend response to match what frontend expects
+        if (result.optimization_results) {
+          // Extract product specific data if available
+          const productLocations: Record<string, number> = {};
+          const totalInventory = { amount: 0, cost: 0 };
+          let productInventory = 0;
           
-          // Instead of returning mock data, enhance the existing result by adding missing properties
-          const enhancedResult = {
-            ...result,
-            optimization_results: {
-              ...result.optimization_results,
-              locations: this.getMockInventoryData(data.product_id).optimization_results.locations
-            }
+          // Get the product's inventory data across all locations
+          if (result.optimization_results.locations) {
+            Object.entries(result.optimization_results.locations).forEach(([location, locData]: [string, any]) => {
+              if (locData.products && locData.products[data.product_id]) {
+                productInventory += locData.products[data.product_id];
+                productLocations[location] = locData.products[data.product_id];
+              }
+              
+              if (typeof locData.total_inventory === 'number') {
+                totalInventory.amount += locData.total_inventory;
+              }
+            });
+          }
+          
+          // Calculate EOQ based on demand, ordering cost, and holding cost
+          const demand = demand_forecast[data.product_id] || 100; // Default if not specified
+          const holdingCost = data.holding_cost || 10;
+          const orderingCost = data.ordering_cost || 100;
+          
+          // Wilson's EOQ formula: sqrt(2 * D * S / H)
+          const eoq = Math.sqrt((2 * demand * orderingCost) / holdingCost);
+          
+          // Calculate reorder point based on lead time and demand
+          const leadTime = data.lead_time || 7;
+          const averageDailyDemand = demand / 30; // Assuming monthly demand
+          const reorderPoint = averageDailyDemand * leadTime;
+          
+          // Safety stock (simplified): leadTime * daily demand * service factor
+          const serviceFactor = data.service_level >= 0.95 ? 1.65 : data.service_level >= 0.9 ? 1.3 : 1.0;
+          const safetyStock = Math.ceil(averageDailyDemand * Math.sqrt(leadTime) * serviceFactor);
+          
+          // Transform backend response to frontend expected format
+          const transformedResponse = {
+            // Frontend-expected fields
+            eoq,
+            reorder_point: reorderPoint,
+            safety_stock: safetyStock,
+            total_cost: result.optimization_results.total_cost || (holdingCost * eoq / 2) + (orderingCost * demand / eoq),
+            product_id: data.product_id,
+            // Pass through the chart data from backend
+            chart_data: result.chart_data || [],
+            // Include original response for debugging/reference
+            optimization_results: result.optimization_results,
+            recommendations: result.recommendations
           };
           
-          return enhancedResult;
+          return transformedResponse;
         }
         
-        // If we get here, the result has the expected format
-        return result;
+        // If we don't have the expected format, return mock data
+        console.warn("API response missing expected structure, using mock data");
+        return this.getMockInventoryData(data.product_id);
       } catch (formatError) {
-        console.warn(`Error checking result format: ${formatError}. Using mock data.`);
+        console.warn(`Error transforming result: ${formatError}. Using mock data.`);
         return this.getMockInventoryData(data.product_id);
       }
     } catch (error) {

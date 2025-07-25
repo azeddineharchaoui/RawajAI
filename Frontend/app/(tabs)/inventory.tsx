@@ -46,6 +46,9 @@ export default function InventoryScreen() {
     safety_stock?: number;
     total_cost?: number;
     chart_data?: any;
+    recommendations?: string | string[];
+    optimization_results?: any;
+    product_id?: string;
   }
   const [optimizationData, setOptimizationData] = useState<OptimizationResult | null>(null);
   const [error, setError] = useState('');
@@ -131,18 +134,140 @@ export default function InventoryScreen() {
         <body>
           <div id="chart"></div>
           <script>
-            const data = ${JSON.stringify(chartData || [])};
+            // Process chart data to ensure it's well-formed
+            let chartData = ${JSON.stringify(chartData || [])};
+            let useYAxis2 = false;
+            
+            // If the data is empty or not in the expected format, create a default chart
+            if (!Array.isArray(chartData) || chartData.length === 0) {
+              // Create a bar chart of EOQ, Reorder Point, and Safety Stock
+              chartData = [{
+                x: ['EOQ', 'Reorder Point', 'Safety Stock'],
+                y: [
+                  ${optimizationData?.eoq || 0},
+                  ${optimizationData?.reorder_point || 0},
+                  ${optimizationData?.safety_stock || 0}
+                ],
+                type: 'bar',
+                marker: {
+                  color: ['rgba(55, 83, 109, 0.7)', 'rgba(26, 118, 255, 0.7)', 'rgba(56, 161, 105, 0.7)']
+                },
+                name: 'Inventory Parameters'
+              }];
+            } else {
+              // Check if any trace is using yaxis2
+              useYAxis2 = chartData.some(trace => trace.yaxis === 'y2');
+              
+              // Ensure all traces have proper configuration
+              chartData = chartData.map(trace => {
+                // Ensure traces have type
+                if (!trace.type) {
+                  trace.type = 'bar';
+                }
+                
+                // Ensure lines+markers mode for scatter traces
+                if (trace.type === 'scatter' && !trace.mode) {
+                  trace.mode = 'lines+markers';
+                }
+                
+                // Enhance markers for scatter traces
+                if (trace.type === 'scatter' && !trace.marker) {
+                  trace.marker = {size: 8};
+                }
+                
+                return trace;
+              });
+            }
+            
+            // Check for inventory parameter charts (EOQ, reorder point, safety stock)
+            let hasParameterChart = chartData.some(trace => 
+              trace.name === 'Inventory Parameters' || 
+              (trace.x && Array.isArray(trace.x) && trace.x.includes('EOQ'))
+            );
+            
+            let hasCostChart = chartData.some(trace => 
+              trace.name === 'Annual Cost Breakdown' || 
+              (trace.x && Array.isArray(trace.x) && trace.x.includes('Holding Cost'))
+            );
+            
+            // Enhanced layout with better defaults and support for multiple charts
             const layout = {
-              margin: { t: 10, r: 10, l: 50, b: 50 },
+              margin: { t: 40, r: useYAxis2 ? 60 : 30, l: 60, b: hasParameterChart ? 200 : 70 },
               paper_bgcolor: '${colorScheme === 'dark' ? '#151718' : '#fff'}',
               plot_bgcolor: '${colorScheme === 'dark' ? '#151718' : '#fff'}',
               font: { color: '${colorScheme === 'dark' ? '#ECEDEE' : '#11181C'}' },
-              xaxis: { showgrid: true, gridcolor: 'rgba(150,150,150,0.1)' },
-              yaxis: { showgrid: true, gridcolor: 'rgba(150,150,150,0.1)' },
+              grid: hasParameterChart ? { 
+                rows: hasCostChart ? 3 : 2, 
+                columns: 1,
+                roworder: 'top to bottom',
+                pattern: 'independent'
+              } : undefined,
+              xaxis: { 
+                showgrid: true, 
+                gridcolor: 'rgba(150,150,150,0.1)',
+                title: 'Locations',
+                domain: [0, 1]
+              },
+              yaxis: { 
+                showgrid: true, 
+                gridcolor: 'rgba(150,150,150,0.1)',
+                title: 'Inventory Units',
+                domain: hasParameterChart ? [0.6, 1] : [0, 1]
+              },
               showlegend: true,
-              legend: { bgcolor: 'rgba(0,0,0,0)' }
+              legend: { 
+                bgcolor: 'rgba(0,0,0,0)',
+                orientation: 'h',
+                y: hasParameterChart ? -0.1 : -0.2
+              },
+              title: {
+                text: 'Inventory Optimization',
+                font: {
+                  size: 18
+                }
+              }
             };
-            Plotly.newPlot('chart', data, layout, { responsive: true });
+            
+            // Add second y-axis if needed
+            if (useYAxis2) {
+              layout.yaxis2 = {
+                title: 'Utilization %',
+                overlaying: 'y',
+                side: 'right',
+                showgrid: false,
+                range: [0, 100]
+              };
+            }
+            
+            // Add parameter chart axes if needed
+            if (hasParameterChart) {
+              layout.xaxis2 = {
+                title: 'Inventory Parameters',
+                domain: [0, 0.45],
+                anchor: 'y3'
+              };
+              layout.yaxis3 = {
+                title: 'Units',
+                domain: [0.25, 0.45],
+                anchor: 'x2'
+              };
+            }
+            
+            // Add cost chart axes if needed
+            if (hasCostChart) {
+              layout.xaxis3 = {
+                title: 'Cost Components',
+                domain: [0.55, 1],
+                anchor: 'y4'
+              };
+              layout.yaxis4 = {
+                title: 'Annual Cost ($)',
+                domain: [0.25, 0.45],
+                anchor: 'x3'
+              };
+            }
+            
+            Plotly.newPlot('chart', chartData, layout, { responsive: true });
           </script>
         </body>
       </html>
@@ -305,6 +430,65 @@ export default function InventoryScreen() {
               ${optimizationData.total_cost?.toFixed(2) || '-'}
             </ThemedText>
           </View>
+          
+          {optimizationData.recommendations && (
+            <>
+              <View style={styles.recommendationDivider} />
+              <ThemedText type="subtitle" style={{marginVertical: 10}}>Recommendations</ThemedText>
+              {typeof optimizationData.recommendations === 'string' ? (
+                optimizationData.recommendations.split('\n').map((rec, index) => (
+                  <View key={index} style={styles.recommendationItem}>
+                    <ThemedText style={styles.bulletPoint}>•</ThemedText>
+                    <ThemedText style={styles.recommendationText}>{rec}</ThemedText>
+                  </View>
+                ))
+              ) : Array.isArray(optimizationData.recommendations) ? (
+                optimizationData.recommendations.map((rec, index) => (
+                  <View key={index} style={styles.recommendationItem}>
+                    <ThemedText style={styles.bulletPoint}>•</ThemedText>
+                    <ThemedText style={styles.recommendationText}>{rec}</ThemedText>
+                  </View>
+                ))
+              ) : null}
+            </>
+          )}
+        </Card>
+      )}
+      
+      {/* Optimization Results */}
+      {optimizationData && !loading && (
+        <Card style={styles.resultsCard}>
+          <ThemedText type="subtitle">Optimization Results</ThemedText>
+          
+          <View style={styles.resultsGrid}>
+            <View style={styles.resultItem}>
+              <ThemedText style={styles.resultLabel}>Economic Order Quantity</ThemedText>
+              <ThemedText style={styles.resultValue}>
+                {optimizationData.eoq ? Math.round(optimizationData.eoq) : 'N/A'} units
+              </ThemedText>
+            </View>
+            
+            <View style={styles.resultItem}>
+              <ThemedText style={styles.resultLabel}>Reorder Point</ThemedText>
+              <ThemedText style={styles.resultValue}>
+                {optimizationData.reorder_point ? Math.round(optimizationData.reorder_point) : 'N/A'} units
+              </ThemedText>
+            </View>
+            
+            <View style={styles.resultItem}>
+              <ThemedText style={styles.resultLabel}>Safety Stock</ThemedText>
+              <ThemedText style={styles.resultValue}>
+                {optimizationData.safety_stock ? Math.round(optimizationData.safety_stock) : 'N/A'} units
+              </ThemedText>
+            </View>
+            
+            <View style={styles.resultItem}>
+              <ThemedText style={styles.resultLabel}>Annual Total Cost</ThemedText>
+              <ThemedText style={styles.resultValue}>
+                ${optimizationData.total_cost ? Math.round(optimizationData.total_cost).toLocaleString() : 'N/A'}
+              </ThemedText>
+            </View>
+          </View>
         </Card>
       )}
       
@@ -319,11 +503,22 @@ export default function InventoryScreen() {
               scrollEnabled={false}
               javaScriptEnabled={true}
               domStorageEnabled={true}
+              originWhitelist={['*']}
               onError={(e) => console.error('WebView error:', e.nativeEvent)}
+              onHttpError={(e) => console.error('WebView HTTP error:', e.nativeEvent)}
               renderError={(errorName) => (
                 <View style={styles.errorContainer}>
                   <ThemedText style={styles.errorText}>Error loading chart: {errorName}</ThemedText>
+                  <Button 
+                    text="Reload" 
+                    onPress={() => optimizeInventory()} 
+                    style={{marginTop: 10}}
+                  />
                 </View>
+              )}
+              startInLoadingState={true}
+              renderLoading={() => (
+                <ActivityIndicator size="small" color={colors.tint} />
               )}
             />
           </View>
@@ -496,17 +691,34 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     padding: 16,
   },
+  resultsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
+  resultItem: {
+    width: '48%',
+    marginBottom: 16,
+    padding: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.03)',
+    borderRadius: 8,
+  },
   resultRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginVertical: 8,
   },
   resultLabel: {
+    fontSize: 14,
+    marginBottom: 4,
     opacity: 0.8,
   },
   resultValue: {
+    fontSize: 16,
     fontWeight: 'bold',
   },
+  
   chartCard: {
     marginBottom: 16,
     padding: 16,
@@ -579,6 +791,26 @@ const styles = StyleSheet.create({
     opacity: 0.6,
     marginTop: 2,
     fontStyle: 'italic',
+  },
+  recommendationDivider: {
+    height: 1,
+    backgroundColor: 'rgba(150,150,150,0.2)',
+    marginVertical: 15,
+  },
+  recommendationItem: {
+    flexDirection: 'row',
+    marginBottom: 8,
+    paddingRight: 10,
+  },
+  bulletPoint: {
+    marginRight: 8,
+    fontSize: 16,
+    opacity: 0.8,
+  },
+  recommendationText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
   },
   selectContainer: {
     flexDirection: 'row',
