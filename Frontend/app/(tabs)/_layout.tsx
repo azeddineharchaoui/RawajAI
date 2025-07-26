@@ -10,23 +10,35 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import {Bot, ChartColumnBig, Cog, Files, House, TrendingUpDown, Warehouse } from 'lucide-react-native'; 
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
+  const colorScheme = useColorScheme()
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        tabBarActiveTintColor: Colors[colorScheme ?? "light"].tint,
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarBackground: TabBarBackground,
         tabBarStyle: Platform.select({
           ios: {
-            // Use a transparent background on iOS to show the blur effect
-            position: 'absolute',
+            position: "absolute",
           },
-          default: {},
+          web: {
+            // Fix shadow warnings on web
+            elevation: 0,
+            shadowOpacity: 0,
+            shadowRadius: 0,
+            shadowOffset: { width: 0, height: 0 },
+            borderTopWidth: 1,
+            borderTopColor: "#e0e0e0",
+            backgroundColor: "rgba(255, 255, 255, 0.95)",
+          },
+          default: {
+            backgroundColor: "rgba(255, 255, 255, 0.95)",
+          },
         }),
-      }}>
+      }}
+    >
       <Tabs.Screen
         name="index"
         options={{
@@ -77,5 +89,5 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
-  );
+  )
 }

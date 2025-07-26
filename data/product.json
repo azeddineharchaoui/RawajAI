@@ -1,0 +1,62 @@
+{
+  "PROD001": {
+    "id": "PROD001",
+    "name": "Smartphone Galaxy Pro",
+    "stock": 45,
+    "price": 2500.00,
+    "category": "Electronics",
+    "supplier": "TechCorp Ltd",
+    "reorder_point": 20,
+    "safety_stock": 15,
+    "demand_forecast": 85,
+    "last_updated": "2024-01-15T10:30:00Z"
+  },
+  "PROD002": {
+    "id": "PROD002",
+    "name": "Laptop Business Elite",
+    "stock": 12,
+    "price": 4200.00,
+    "category": "Electronics",
+    "supplier": "CompuTech Solutions",
+    "reorder_point": 8,
+    "safety_stock": 5,
+    "demand_forecast": 25,
+    "last_updated": "2024-01-14T15:45:00Z"
+  },
+  "PROD003": {
+    "id": "PROD003",
+    "name": "Office Chair Ergonomic",
+    "stock": 78,
+    "price": 850.00,
+    "category": "Furniture",
+    "supplier": "Furniture Plus",
+    "reorder_point": 30,
+    "safety_stock": 20,
+    "demand_forecast": 40,
+    "last_updated": "2024-01-13T09:15:00Z"
+  },
+  "PROD004": {
+    "id": "PROD004",
+    "name": "Coffee Machine Deluxe",
+    "stock": 5,
+    "price": 1200.00,
+    "category": "Appliances",
+    "supplier": "Kitchen Pro",
+    "reorder_point": 10,
+    "safety_stock": 8,
+    "demand_forecast": 15,
+    "last_updated": "2024-01-12T14:20:00Z"
+  },
+  "PROD005": {
+    "id": "PROD005",
+    "name": "oUMAYMA",
+    "stock": 200,
+    "price": 1200.00,
+    "category": "Appliances",
+    "supplier": "Kitchen Pro",
+    "reorder_point": 10,
+    "safety_stock": 8,
+    "demand_forecast": 15,
+    "last_updated": "2024-01-12T14:20:00Z"
+  }
+}

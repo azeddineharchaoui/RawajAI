@@ -126,7 +126,7 @@ export default function DashboardScreen() {
           />
           <ActionButton
             title="Generate Report"
-            icon={require('@/assets/images/reporti.webp')}
+            icon={require('@/assets/images/reporti.png')}
             onPress={() => router.push('/(tabs)/analytics')}
           />
         </View>

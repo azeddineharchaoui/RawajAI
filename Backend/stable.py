@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # app.py
 # Make sure to install these dependencies before running:
 # Required packages:
@@ -73,6 +74,12 @@ import re
 import io
 from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
+=======
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import pandas as pd
+import numpy as np
+>>>>>>> oumayma
 
 # Import PDF handling libraries
 try:
@@ -83,7 +90,9 @@ except ImportError:
     PDF_SUPPORT = False
 
 app = Flask(__name__)
+CORS(app)  # Pour permettre les requêtes depuis le frontend
 
+<<<<<<< HEAD
 CORS(app) 
 
 # Configuration
@@ -4128,24 +4137,46 @@ def stop_tunnel():
         })
     
     tunnel.stop()
+=======
+@app.route('/')
+def hello():
+    return "Backend RAwajAI is running!"
+
+@app.route('/api/test')
+def test():
+    return jsonify({"message": "API is working", "status": "success"})
+
+@app.route('/api/status')
+def api_status():
+>>>>>>> oumayma
     return jsonify({
-        "status": "stopped",
-        "message": "Tunnel stopped successfully"
+        "status": "connected",
+        "message": "API connectée avec succès"
     })
 
-# Test route to verify tunnel connectivity
-@app.route('/tunnel/test', methods=['GET'])
-def test_tunnel():
-    """Test route to verify tunnel connectivity"""
+@app.route('/api/dashboard')
+def dashboard():
     return jsonify({
-        "status": "success",
-        "message": "Tunnel is working properly!",
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "tunnel_status": "running" if tunnel.is_running else "stopped",
-        "tunnel_url": tunnel.get_public_url() if tunnel.is_running else None
+        "products": 15,
+        "low_stock": 4,
+        "anomalies": 2,
+        "alerts": 3,
+        "status": "connected"
+    })
+
+@app.route('/api/products')
+def products():
+    # Données d'exemple
+    return jsonify({
+        "products": [
+            {"id": 1, "name": "Produit 1", "stock": 10},
+            {"id": 2, "name": "Produit 2", "stock": 5},
+            {"id": 3, "name": "Produit 3", "stock": 0}
+        ]
     })
 
 if __name__ == '__main__':
+<<<<<<< HEAD
     # Check Plotly and Kaleido compatibility at startup
     try:
         import plotly
@@ -4333,7 +4364,7 @@ if __name__ == '__main__':
         print("You can start it manually later via the /tunnel/start endpoint")
     
     print("\n=== Starting Supply Chain AI Agent Server ===")
-    print("Web interface will be available at http://localhost:5000")
+    print("Web interface will be available at http://192.168.1.15:5000")
     print("Multi-lingual support: English, French, Arabic")
     print("Features: Demand forecasting, Inventory optimization, Anomaly detection, Scenario analysis")
     print("Press Ctrl+C to stop the server and tunnel")
@@ -4357,3 +4388,6 @@ if __name__ == '__main__':
             except Exception as thread_e:
                 print(f"Failed to start Flask in thread: {str(thread_e)}")
                 print("Please check Flask version and configuration")
+=======
+    app.run(debug=True, host='0.0.0.0', port=5000)
+>>>>>>> oumayma

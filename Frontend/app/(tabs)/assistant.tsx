@@ -27,6 +27,9 @@ type Message = {
   audioPlaybackFailed?: boolean;
 };
 
+
+
+
 export default function AssistantScreen() {
   const colorScheme = useColorScheme();
   
@@ -480,6 +483,10 @@ const SuggestionChip = ({ text, onPress }: SuggestionChipProps) => {
     </TouchableOpacity>
   );
 };
+
+
+
+
 
 const styles = StyleSheet.create({
   container: {
