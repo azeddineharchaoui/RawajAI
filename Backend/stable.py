@@ -1,16 +1,11 @@
-# app.py
-# Make sure to install these dependencies before running:
-# Required packages:
-!pip install transformers langchain-huggingface kaleido==0.2.1 torch torchaudio langchain_community bitsandbytes autoawq accelerate sentencepiece protobuf pulp scipy plotly==5.24.1 reportlab gtts pytrends faiss-cpu pydub==0.25.1 soundfile==0.12.1 ffmpeg-python==0.2.0
-!pip install kaleido==0.2.1 plotly==5.24.1 langchain_text_splitters==0.0.1 langchain_huggingface
-!pip install flask-cors==4.0.0 Flask-CORS==4.0.0 pypdf==3.17.0 langdetect langchain_core
+
 
 # Import Colab configuration
 from colab_config import setup_colab_environment, optimize_model_loading
 
 # Setup Colab environment
 clean_memory = setup_colab_environment()
-
+!pip install -U langchain-community
 # Rest of imports
 import os
 import sys
@@ -56,7 +51,7 @@ import soundfile as sf
 from pydub import AudioSegment
 from gtts import gTTS
 from langchain.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import torch
 import os
@@ -87,10 +82,10 @@ app = Flask(__name__)
 CORS(app) 
 
 # Configuration
-# os.environ["HF_TOKEN"] = 
-MODEL_NAME = "mistralai/Mistral-7B-v0.1"
+os.environ["HF_TOKEN"] = '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'
+MODEL_NAME = "inceptionai/jais-13b"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-WHISPER_MODEL = "openai/whisper-medium"
+WHISPER_MODEL = "openai/whisper-large-v3"  # Updated to a more accurate model
 DATA_PATH = '/content/supply_chain_dataset.csv'
 WEATHER_DATA_PATH = '/content/weather_data.csv'
 TRENDS_DATA_PATH = '/content/trends_data.csv'
@@ -115,16 +110,17 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 tokenizer.pad_token = tokenizer.eos_token
 
 # Get optimized model settings
-model_settings = optimize_model_loading(MODEL_NAME)
+# model_settings = optimize_model_loading(MODEL_NAME)
 
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
-    **model_settings,
     quantization_config=BitsAndBytesConfig(
         load_in_4bit=True,
-        bnb_4bit_compute_dtype=torch.float16,
-        bnb_4bit_quant_type="nf4"
-    )
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype="float16"
+    ),
+    device_map="auto"
 )
 
 # Clean up memory after model loading
@@ -137,7 +133,8 @@ llm_pipeline = pipeline(
     max_new_tokens=512,
     temperature=0.7,
     top_p=0.95,
-    repetition_penalty=1.15
+    repetition_penalty=1.15,
+    trust_remote_code=True
 )
 
 # Clean memory again after pipeline setup
@@ -151,8 +148,8 @@ whisper_model = None
 device = "cpu"
 
 # Define the transcribe_audio function at global scope so it's accessible everywhere
-def transcribe_audio(audio_file, language="en"):
-    """Transcribe audio file using Whisper with optimized accuracy and performance"""
+def transcribe_audio(audio_file, language="auto"):
+    """Transcribe audio file using Whisper with optimized accuracy and performance, returning transcription and detected language"""
     try:
         import os
         import subprocess
@@ -160,87 +157,44 @@ def transcribe_audio(audio_file, language="en"):
         import soundfile as sf
         import numpy as np
         import torch
-        import torchaudio
-        
+        import re
+
         print(f"Transcribing audio with target language: {language}")
         
-        # Check file existence
+        # Check file existence and size
         if not os.path.exists(audio_file):
             print(f"Audio file does not exist: {audio_file}")
-            return "Error: Audio file not found"
-        
-        # Check file size
+            return "Error: Audio file not found", "unknown"
         file_size = os.path.getsize(audio_file)
         if file_size == 0:
             print("Empty audio file received")
-            return "Error: Empty audio file"
-        
+            return "Error: Empty audio file", "unknown"
         print(f"Processing audio file: {audio_file} (Size: {file_size} bytes)")
         
-        # ===== 1. AUDIO PREPROCESSING - OPTIMIZED =====
-        # Prepare optimized audio for Whisper
+        # Audio preprocessing (same as before)
         temp_wav_path = f"{os.path.splitext(audio_file)[0]}_whisper_compatible.wav"
-        
         try:
-            # Load and normalize audio with pydub
             audio = AudioSegment.from_file(audio_file)
-            
-            # Voice activity detection to trim silence (improves accuracy)
             from pydub.silence import detect_nonsilent
-            
-            # Detect non-silent chunks with lenient parameters
-            non_silent_chunks = detect_nonsilent(
-                audio, 
-                min_silence_len=500,  # 500ms silence threshold
-                silence_thresh=-40    # -40 dBFS silence threshold (higher = more aggressive)
-            )
-            
-            # If we found non-silent chunks, keep only those parts
+            non_silent_chunks = detect_nonsilent(audio, min_silence_len=500, silence_thresh=-40)
             if non_silent_chunks and len(non_silent_chunks) > 0:
-                # Add small padding around non-silent chunks
-                padding_ms = 200  # 200ms padding
+                padding_ms = 200
                 chunks = []
                 for start, end in non_silent_chunks:
                     chunk_start = max(0, start - padding_ms)
                     chunk_end = min(len(audio), end + padding_ms)
                     chunks.append(audio[chunk_start:chunk_end])
-                
-                # Combine chunks
-                if chunks:
-                    audio = sum(chunks, AudioSegment.empty())
-                    print(f"Trimmed silence: {len(audio)/1000:.2f}s (from original {len(audio)/1000:.2f}s)")
-            
-            # Convert to mono and 16kHz with high quality settings
-            audio = audio.set_channels(1)
-            audio = audio.set_frame_rate(16000)
-            
-            # Normalize audio volume for better recognition (target_dBFS = -14)
+                audio = sum(chunks, AudioSegment.empty()) if chunks else audio
+                print(f"Trimmed silence: {len(audio)/1000:.2f}s")
+            audio = audio.set_channels(1).set_frame_rate(16000)
             target_dBFS = -14.0
-            change_in_dBFS = target_dBFS - audio.dBFS
-            normalized_audio = audio.apply_gain(change_in_dBFS)
-            
-            # Export with optimal parameters for Whisper
-            normalized_audio.export(
-                temp_wav_path, 
-                format="wav", 
-                parameters=[
-                    "-acodec", "pcm_s16le", 
-                    "-ar", "16000", 
-                    "-ac", "1",
-                    "-sample_fmt", "s16"
-                ]
-            )
-            
+            normalized_audio = audio.apply_gain(target_dBFS - audio.dBFS)
+            normalized_audio.export(temp_wav_path, format="wav", parameters=["-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1"])
             print(f"Enhanced audio saved to: {temp_wav_path}")
-            
-            # Verify file was created properly
             if os.path.exists(temp_wav_path) and os.path.getsize(temp_wav_path) > 0:
                 audio_file = temp_wav_path
-            else:
-                print("WARNING: Enhanced audio file is empty, will try alternate methods")
         except Exception as audio_error:
             print(f"Audio enhancement failed: {audio_error}")
-            # Fallback to basic conversion
             try:
                 print("Falling back to basic ffmpeg conversion...")
                 command = f'ffmpeg -y -i "{audio_file}" -ac 1 -ar 16000 -c:a pcm_s16le "{temp_wav_path}"'
@@ -249,177 +203,98 @@ def transcribe_audio(audio_file, language="en"):
                     audio_file = temp_wav_path
             except Exception as ffmpeg_error:
                 print(f"FFmpeg conversion failed: {ffmpeg_error}")
-                # Continue with original file
-        
+
         # Check model availability
         global whisper_model, whisper_processor
         if whisper_model is None or whisper_processor is None:
-            return "Speech recognition model is not initialized. Please try again later."
-        
-        # ===== 2. AUDIO LOADING - OPTIMIZED =====
-        # Load audio with consistent approach
+            return "Speech recognition model is not initialized.", "unknown"
+
+        # Audio loading (same as before)
         try:
-            # Load with soundfile (optimized for WAV)
             audio_data, sample_rate = sf.read(audio_file)
-            
-            # Ensure audio is the right format (float32, normalized, mono)
             if audio_data.dtype != np.float32:
                 audio_data = audio_data.astype(np.float32)
-            
-            # Convert to mono if needed
             if len(audio_data.shape) > 1 and audio_data.shape[1] > 1:
                 audio_data = np.mean(audio_data, axis=1)
-            
-            # Normalize audio to [-1.0, 1.0] range
             if np.abs(audio_data).max() > 0.0:
                 audio_data = audio_data / np.abs(audio_data).max()
-            
             print(f"Audio loaded successfully: shape={audio_data.shape}, sr={sample_rate}")
         except Exception as load_error:
             print(f"Error loading audio: {load_error}")
-            return "Error processing audio: Could not load the audio file"
-        
-        # ===== 3. WHISPER PROCESSING - OPTIMIZED =====
+            return "Error processing audio: Could not load the audio file", "unknown"
+
+        # Whisper processing with improved language detection
         print("Processing with Whisper model...")
         try:
-            # Move model to appropriate device once
             device = next(whisper_model.parameters()).device
             print(f"Using Whisper model on device: {device}")
             
-            # Full language support map - common Whisper languages
-            language_map = {
-                # Common languages
-                "en": "english", "fr": "french", "ar": "arabic", 
-                # Special handling
-                "auto": None
-            }
+            input_features = whisper_processor(audio_data, sampling_rate=sample_rate, return_tensors="pt").input_features.to(device)
             
-            # Set task type - important for accuracy
-            task = "transcribe"  # For transcription (vs. translation)
-            
-            # Handle language selection with better mapping
-            if language.lower() == "auto":
-                print("Auto language detection enabled")
-                forced_decoder_ids = None
-                detected_language = "auto"
-            else:
-                # Check if we can get a direct mapping
-                mapped_lang = language_map.get(language.lower(), None)
-                
-                if mapped_lang:
-                    print(f"Using specified language: {mapped_lang}")
-                    try:
-                        # Try to get decoder IDs for this language
-                        forced_decoder_ids = whisper_processor.get_decoder_prompt_ids(
-                            language=mapped_lang, 
-                            task=task
-                        )
-                        detected_language = language.lower()
-                    except Exception as lang_error:
-                        print(f"Error setting language '{mapped_lang}': {lang_error}")
-                        print("Falling back to auto-detection")
-                        forced_decoder_ids = None
-                        detected_language = "auto"
-                else:
-                    print(f"Language '{language}' not recognized, enabling auto-detection")
-                    forced_decoder_ids = None
-                    detected_language = "auto"
-            
-            # Process audio features
-            input_features = whisper_processor(
-                audio_data, 
-                sampling_rate=sample_rate,
-                return_tensors="pt"
-            ).input_features
-            
-            # Ensure features are on same device as model
-            input_features = input_features.to(device)
-            
-            # Run inference with optimized parameters
-            print("Running Whisper inference...")
+            print("Running Whisper inference with language detection...")
             with torch.no_grad():
-                # Use compatible generation parameters for improved accuracy
+                # ALWAYS use auto-detection first to get the language
                 generation_kwargs = {
-                    "forced_decoder_ids": forced_decoder_ids,
-                    "max_length": 448,        # Longer context
-                    "num_beams": 5,           # Beam search for better results
-                    "temperature": 0.0        # Greedy decoding for accuracy
+                    "max_length": 448,
+                    "num_beams": 5,
+                    "temperature": 0.0,
+                    "task": "transcribe",
+                    "return_timestamps": False,
+                    "language": None  # Force auto-detection
                 }
                 
-                # Only add language and task if not auto-detection
-                if detected_language != "auto":
-                    generation_kwargs["language"] = detected_language
-                    generation_kwargs["task"] = task
-                
-                # We'll use a safer approach - only use known working parameters
-                # This avoids the error with condition_on_previous_text and other unsupported params
-                
-                # Safe parameters that work across all Whisper versions
-                print("Using safe generation parameters for maximum compatibility")
-                
-                # Generate transcription
-                predicted_ids = whisper_model.generate(
-                    input_features,
-                    **generation_kwargs
-                )
+                predicted_ids = whisper_model.generate(input_features, **generation_kwargs)
             
-            # Decode the output
-            result = whisper_processor.batch_decode(
-                predicted_ids, 
-                skip_special_tokens=True,
-                normalize=True  # Normalize text for better readability
-            )[0]
+            # Decode with special tokens to extract language
+            full_output = whisper_processor.batch_decode(predicted_ids, skip_special_tokens=False)[0]
+            print(f"Raw Whisper output: {full_output[:200]}...")
             
-            # ===== 4. POST-PROCESSING - IMPROVED =====
-            # Clean up transcription for better readability
-            import re
+            # Extract language token using improved regex
+            lang_token_pattern = r'<\|([a-z]{2})\|>'
+            match = re.search(lang_token_pattern, full_output)
             
-            # Remove repeated spaces
-            result = re.sub(r'\s+', ' ', result).strip()
+            if match:
+                detected_language = match.group(1)
+                print(f"Detected language from token: {detected_language}")
+            else:
+                # Fallback: try to detect from text content
+                clean_output = whisper_processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+                detected_language = detect_language_from_text(clean_output)
+                print(f"Detected language from text analysis: {detected_language}")
             
-            # Fix common transcription artifacts
-            result = re.sub(r'\(silence\)', '', result)
-            result = re.sub(r'\(music\)', '', result)
-            result = re.sub(r'\(laughter\)', '', result)
-            result = re.sub(r'\(applause\)', '', result)
-            result = re.sub(r'\(inaudible\)', '', result)
+            # Clean the transcription
+            transcription = whisper_processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
             
-            # Ensure proper capitalization
-            if result and len(result) > 0:
-                result = result[0].upper() + result[1:]
-                
-            # Add proper ending punctuation if missing
-            if result and len(result) > 0 and not result[-1] in '.!?':
-                result += '.'
-                
-            print(f"Transcription successful: {result[:100]}...")
-            return result
+            # Post-processing
+            transcription = re.sub(r'\s+', ' ', transcription).strip()
+            transcription = re.sub(r'\(silence\)| \(music\)| \(laughter\)| \(applause\)| \(inaudible\)', '', transcription)
+            
+            if transcription and len(transcription) > 0:
+                # Capitalize first letter if it's Latin script
+                if detected_language in ['en', 'fr'] and transcription[0].islower():
+                    transcription = transcription[0].upper() + transcription[1:]
+                # Add period if missing and it's not Arabic (Arabic might end differently)
+                if not transcription[-1] in '.!?؟' and detected_language != 'ar':
+                    transcription += '.'
+                elif detected_language == 'ar' and not transcription[-1] in '.!?؟':
+                    transcription += '.'
+            
+            print(f"Final transcription: {transcription[:100]}...")
+            print(f"Detected language: {detected_language}")
+            return transcription, detected_language
             
         except Exception as whisper_error:
             print(f"Whisper processing error: {whisper_error}")
             import traceback
             traceback.print_exc()
-            
-            # Try to provide a more user-friendly error message
-            error_str = str(whisper_error)
-            friendly_message = "Error processing audio with Whisper"
-            
-            # Known error patterns
-            if "device" in error_str.lower():
-                friendly_message = "Audio processing device error. Trying again might help."
-            elif "memory" in error_str.lower() or "cuda" in error_str.lower():
-                friendly_message = "System memory issue with speech recognition. Try a shorter audio clip."
-            elif "model" in error_str.lower() and "kwargs" in error_str.lower():
-                friendly_message = "Speech recognition configuration issue. This will be fixed in the next update."
-            
-            print(f"Friendly message: {friendly_message}")
-            return friendly_message
+            return f"Error processing audio with Whisper: {str(whisper_error)}", "unknown"
             
     except Exception as e:
         print(f"Transcription failed with error: {str(e)}")
         import traceback
         traceback.print_exc()
-        return f"Error transcribing audio: {str(e)}"
+        return f"Error transcribing audio: {str(e)}", "unknown"
+
 
 # Optimized Whisper model initialization
 try:
@@ -535,31 +410,107 @@ except Exception as whisper_init_error:
 
 
 # Text-to-Speech function using gTTS
-def generate_speech(text, language="en"):
-    """Generate speech from text using Google Text-to-Speech with support for long texts"""
+def detect_language_from_text(text):
+    """Enhanced fallback language detection using text analysis with better Arabic detection"""
     try:
+        # First check for Arabic characters (most reliable indicator)
+        arabic_chars = sum(1 for c in text if '\u0600' <= c <= '\u06FF')
+        total_chars = len([c for c in text if c.isalpha()])
+        
+        if total_chars > 0:
+            arabic_ratio = arabic_chars / total_chars
+            print(f"Arabic character ratio: {arabic_ratio:.2f} ({arabic_chars}/{total_chars})")
+            
+            # If more than 30% Arabic characters, it's Arabic
+            if arabic_ratio > 0.3:
+                print("Detected Arabic based on character analysis")
+                return 'ar'
+        
+        # Try langdetect library if available
+        try:
+            from langdetect import detect
+            detected = detect(text)
+            print(f"Langdetect result: {detected}")
+            
+            # Map to our supported languages
+            if detected == 'ar':
+                return 'ar'
+            elif detected in ['en', 'fr']:
+                return detected
+            elif detected in ['es', 'pt', 'it']:  # Romance languages -> French
+                return 'fr'
+            else:
+                # For other languages, check for French accents as secondary indicator
+                french_chars = sum(1 for c in text if c in 'àâäçéèêëïîôùûüÿñæœÀÂÄÇÉÈÊËÏÎÔÙÛÜŸÑÆŒ')
+                if french_chars > 0:
+                    return 'fr'
+                return 'en'  # Default fallback
+                
+        except ImportError:
+            print("langdetect not available, using character-based detection")
+        except Exception as e:
+            print(f"langdetect failed: {e}")
+        
+        # Fallback character-based detection
+        french_chars = sum(1 for c in text if c in 'àâäçéèêëïîôùûüÿñæœÀÂÄÇÉÈÊËÏÎÔÙÛÜŸÑÆŒ')
+        
+        if arabic_chars > 0:
+            return 'ar'
+        elif french_chars > 0:
+            return 'fr'
+        else:
+            return 'en'
+            
+    except Exception as e:
+        print(f"Language detection error: {e}")
+        return 'en'  # Safe fallback
+
+
+# Updated generate_speech function with better language support
+def generate_speech(text, language="auto"):
+    """Generate speech from text using Google Text-to-Speech with support for long texts and proper language detection"""
+    try:
+        import os
+        import time
+        from datetime import datetime
+        from gtts import gTTS
+        from pydub import AudioSegment
+        import re
+        
         # Validate input text
         if not text or not isinstance(text, str):
             print("Invalid text for speech generation")
             return None
             
-        print(f"Generating speech for {len(text)} characters of text")
+        print(f"Generating speech for {len(text)} characters of text in language: {language}")
         
-        # Detect language using langdetect
-        try:
-            detected_lang = detect(text)
-            # Restrict to supported languages (en, ar, fr)
-            lang = detected_lang if detected_lang in ["en", "ar", "fr"] else "en"
-            print(f"Detected language: {detected_lang}, using: {lang}")
-        except Exception as lang_err:
-            print(f"Language detection failed: {lang_err}, defaulting to English")
-            lang = "en"
+        # Improved language detection and mapping
+        if language == "auto" or not language:
+            detected_lang = detect_language_from_text(text)
+            print(f"Auto-detected language: {detected_lang}")
+        else:
+            detected_lang = language
+        
+        # Normalize and map to gTTS supported language codes
+        gtts_language_map = {
+            'en': 'en',
+            'fr': 'fr', 
+            'ar': 'ar',
+            'english': 'en',
+            'french': 'fr',
+            'arabic': 'ar',
+            'auto': 'en'  # fallback
+        }
+        
+        # Ensure we get a valid language code
+        gtts_lang = gtts_language_map.get(detected_lang.lower(), 'en')
+        print(f"Using gTTS language code: {gtts_lang}")
         
         # Ensure AUDIO_PATH directory exists
         if not os.path.exists(AUDIO_PATH):
             os.makedirs(AUDIO_PATH, exist_ok=True)
         
-        # Clean up old audio files (older than 24 hours) to prevent disk fill-up
+        # Clean up old audio files (older than 24 hours)
         try:
             cleanup_time = time.time() - (24 * 60 * 60)  # 24 hours ago
             for old_file in os.listdir(AUDIO_PATH):
@@ -575,18 +526,19 @@ def generate_speech(text, language="en"):
         
         # Generate a unique timestamp for this audio file
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        filename = f"{AUDIO_PATH}/response_{timestamp}.mp3"
+        filename = f"{AUDIO_PATH}/response_{timestamp}_{gtts_lang}.mp3"
         
         # Check if text exceeds gTTS limitations
-        max_chunk_length = 5000  # Safe limit for gTTS
+        max_chunk_length = 4000  # Conservative limit for gTTS
         
         if len(text) <= max_chunk_length:
             # Standard case - text is within limits
             try:
-                # Use slow=False for normal speed, but can be adjusted for clarity if needed
-                tts = gTTS(text=text, lang=lang, slow=False)
+                # Adjust speech rate based on language
+                slow_speech = gtts_lang == 'ar'  # Arabic might need slower speech
+                tts = gTTS(text=text, lang=gtts_lang, slow=slow_speech)
                 
-                # Add linear backoff retry mechanism for network issues
+                # Retry mechanism for network issues
                 max_retries = 3
                 retry_delay = 1
                 for attempt in range(max_retries):
@@ -596,57 +548,49 @@ def generate_speech(text, language="en"):
                         break
                     except Exception as retry_error:
                         if attempt < max_retries - 1:
-                            retry_delay += 1    # linear backoff: 1s, 2s, 3s
+                            retry_delay += 1
                             print(f"Retrying TTS save after {retry_delay}s delay. Error: {retry_error}")
                             time.sleep(retry_delay)
                         else:
-                            raise  # Re-raise on final attempt
+                            raise
                             
             except Exception as save_error:
                 print(f"Error saving speech file after retries: {save_error}")
-                # Try with a simpler filename if there might be path issues
-                simple_filename = f"{AUDIO_PATH}/response.mp3"
-                try:
-                    tts.save(simple_filename)
-                    filename = simple_filename
-                except Exception as final_error:
-                    print(f"Final attempt to save speech failed: {final_error}")
-                    return None
+                return None
         else:
             # Handle long text by breaking it into chunks
             print(f"Text exceeds max length ({len(text)} chars). Splitting into chunks.")
             
-            # Split by sentences to avoid breaking mid-sentence
-            sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z0-9])', text)
+            # Language-aware sentence splitting
+            if gtts_lang == 'ar':
+                # Arabic sentence splitting - split on Arabic question mark and period
+                sentences = re.split(r'(?<=[.!?؟])\s+', text)
+            else:
+                # English/French sentence splitting
+                sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z0-9])', text)
             
-            # If we couldn't split properly (e.g., no capitalization after periods)
+            # Ensure we have meaningful splits
             if len(sentences) <= 1:
-                # Fall back to simpler sentence splitting
-                sentences = re.split(r'(?<=[.!?])\s+', text)
-            
-            # If text is still not properly split, use a more aggressive approach
-            if len(sentences) <= 3 and len(text) > max_chunk_length * 2:
-                # Split on any period, question mark, or exclamation mark
-                sentences = re.split(r'(?<=[.!?])', text)
-                # Clean up any empty items
-                sentences = [s.strip() for s in sentences if s.strip()]
+                sentences = re.split(r'(?<=[.!?؟])\s+', text)
             
             chunks = []
             current_chunk = ""
             
             # Group sentences into chunks under the max length
             for sentence in sentences:
-                # If the sentence itself exceeds the max length, split it further
                 if len(sentence) > max_chunk_length:
-                    # If we have a current chunk, add it first
+                    # Handle very long sentences
                     if current_chunk:
                         chunks.append(current_chunk.strip())
                         current_chunk = ""
                     
-                    # Split long sentence by phrases (commas, semicolons, etc.)
-                    phrases = re.split(r'(?<=[,;:])\s+', sentence)
-                    phrase_chunk = ""
+                    # Split by commas or other punctuation
+                    if gtts_lang == 'ar':
+                        phrases = re.split(r'(?<=[،,;:])\s+', sentence)
+                    else:
+                        phrases = re.split(r'(?<=[,;:])\s+', sentence)
                     
+                    phrase_chunk = ""
                     for phrase in phrases:
                         if len(phrase_chunk) + len(phrase) < max_chunk_length:
                             phrase_chunk += phrase + " "
@@ -655,52 +599,48 @@ def generate_speech(text, language="en"):
                                 chunks.append(phrase_chunk.strip())
                             phrase_chunk = phrase + " "
                     
-                    # Add the last phrase chunk if not empty
                     if phrase_chunk.strip():
                         current_chunk = phrase_chunk.strip()
-                    
-                # Normal case - add sentence to current chunk if it fits
+                        
                 elif len(current_chunk) + len(sentence) < max_chunk_length:
                     current_chunk += sentence + " "
                 else:
-                    # Current chunk is full, store it and start a new one
                     if current_chunk:
                         chunks.append(current_chunk.strip())
                     current_chunk = sentence + " "
             
-            # Add the last chunk if not empty
             if current_chunk.strip():
                 chunks.append(current_chunk.strip())
                 
-            # Ensure we have at least one chunk
             if not chunks and text:
-                # Emergency fallback - split by a fixed size
                 chunks = [text[i:i+max_chunk_length] for i in range(0, len(text), max_chunk_length)]
             
             print(f"Split text into {len(chunks)} chunks for TTS processing")
             
-            # Process each chunk and combine the audio files
+            # Process each chunk
             chunk_files = []
+            slow_speech = gtts_lang == 'ar'
             
             for i, chunk in enumerate(chunks):
-                chunk_filename = f"{AUDIO_PATH}/chunk_{timestamp}_{i}.mp3"
+                chunk_filename = f"{AUDIO_PATH}/chunk_{timestamp}_{gtts_lang}_{i}.mp3"
                 try:
-                    chunk_tts = gTTS(text=chunk, lang=lang, slow=False)
+                    chunk_tts = gTTS(text=chunk, lang=gtts_lang, slow=slow_speech)
                     chunk_tts.save(chunk_filename)
                     chunk_files.append(chunk_filename)
                     print(f"Generated chunk {i+1}/{len(chunks)}")
                 except Exception as chunk_error:
                     print(f"Error processing chunk {i}: {chunk_error}")
             
-            # Combine audio files if we have at least one successful chunk
+            # Combine audio files
             if chunk_files:
                 try:
                     combined = AudioSegment.empty()
                     for chunk_file in chunk_files:
                         segment = AudioSegment.from_mp3(chunk_file)
                         combined += segment
+                        # Add small pause between chunks
+                        combined += AudioSegment.silent(duration=300)  # 300ms pause
                     
-                    # Save the combined file
                     combined.export(filename, format="mp3")
                     
                     # Clean up chunk files
@@ -710,21 +650,15 @@ def generate_speech(text, language="en"):
                         except:
                             pass
                             
-                except ImportError:
-                    print("pydub not available, using first chunk as response")
-                    if chunk_files:
-                        filename = chunk_files[0]
                 except Exception as combine_error:
                     print(f"Error combining audio chunks: {combine_error}")
-                    # Fall back to first chunk if combining fails
                     if chunk_files:
                         filename = chunk_files[0]
             else:
-                # If all chunks failed, try with a shortened version of the text
+                print("All chunks failed, creating fallback audio")
                 try:
-                    print("All chunks failed, falling back to shortened text")
                     shortened_text = text[:max_chunk_length] + "..."
-                    tts = gTTS(text=shortened_text, lang=lang, slow=False)
+                    tts = gTTS(text=shortened_text, lang=gtts_lang, slow=slow_speech)
                     tts.save(filename)
                 except Exception as fallback_error:
                     print(f"Fallback TTS also failed: {fallback_error}")
@@ -733,7 +667,6 @@ def generate_speech(text, language="en"):
         # Verify the file was created
         if os.path.exists(filename):
             print(f"Speech file successfully created: {filename}")
-            # Return relative path for URL construction
             return filename
         else:
             print("Speech file was not created")
@@ -742,7 +675,8 @@ def generate_speech(text, language="en"):
     except Exception as e:
         print(f"Speech generation failed: {e}")
         return None
-    
+
+
 # Load and process data
 def load_data():
     """Load all necessary data or create simulated data if files don't exist"""
@@ -2261,11 +2195,7 @@ report_generator = ReportGenerator()
 def post_process_response(text, language="en"):
     """
     Post-process the LLM response to make it more suitable for conversation and TTS
-    
-    This function cleans up the response to ensure it's well-formatted for speech synthesis
-    and doesn't contain elements that would sound awkward when spoken.
-    
-    It also ensures responses are formatted in 2-3 paragraphs without numbered phrases.
+    Enhanced with better Arabic text handling
     """
     import re
     
@@ -2285,21 +2215,39 @@ def post_process_response(text, language="en"):
     # Remove bullet points
     text = re.sub(r'^\s*[\*\-•]\s+', '', text, flags=re.MULTILINE)
     
-    # Replace symbols that don't work well in speech
-    replacements = {
-        '```': ' ',
-        '**': ' ',
-        '*': ' ',
-        '#': ' ',
-        '|': ', ',
-        '=': ' equals ',
-        '->': ' to ',
-        '<-': ' from ',
-        '>=': ' greater than or equal to ',
-        '<=': ' less than or equal to ',
-        '>': ' greater than ',
-        '<': ' less than ',
-    }
+    # Language-specific symbol replacements
+    if language == 'ar':
+        # Arabic-specific replacements
+        replacements = {
+            '```': ' ',
+            '**': ' ',
+            '*': ' ',
+            '#': ' ',
+            '|': '، ',  # Arabic comma
+            '=': ' يساوي ',
+            '->': ' إلى ',
+            '<-': ' من ',
+            '>=': ' أكبر من أو يساوي ',
+            '<=': ' أصغر من أو يساوي ',
+            '>': ' أكبر من ',
+            '<': ' أصغر من ',
+        }
+    else:
+        # English/French replacements
+        replacements = {
+            '```': ' ',
+            '**': ' ',
+            '*': ' ',
+            '#': ' ',
+            '|': ', ',
+            '=': ' equals ',
+            '->': ' to ',
+            '<-': ' from ',
+            '>=': ' greater than or equal to ',
+            '<=': ' less than or equal to ',
+            '>': ' greater than ',
+            '<': ' less than ',
+        }
     
     for old, new in replacements.items():
         text = text.replace(old, new)
@@ -2307,16 +2255,27 @@ def post_process_response(text, language="en"):
     # Fix spacing issues
     text = re.sub(r'\s+', ' ', text).strip()
     
-    # Ensure proper sentence breaks for TTS natural pauses
-    text = re.sub(r'([.!?])\s*([A-Z])', r'\1 \2', text)
+    # Language-specific sentence processing
+    if language == 'ar':
+        # Arabic sentence breaks
+        text = re.sub(r'([.!?؟])\s*([أابتثجحخدذرز])', r'\1 \2', text)
+    else:
+        # English/French sentence breaks
+        text = re.sub(r'([.!?])\s*([A-Z])', r'\1 \2', text)
     
-    # Handle numbers for better speech (e.g., "100,000" -> "100 thousand")
+    # Handle numbers for better speech
     def number_to_words(match):
         num = int(match.group(0).replace(',', ''))
-        if num >= 1000000:
-            return f"{num // 1000000} million"
-        elif num >= 1000:
-            return f"{num // 1000} thousand"
+        if language == 'ar':
+            if num >= 1000000:
+                return f"{num // 1000000} مليون"
+            elif num >= 1000:
+                return f"{num // 1000} ألف"
+        else:
+            if num >= 1000000:
+                return f"{num // 1000000} million"
+            elif num >= 1000:
+                return f"{num // 1000} thousand"
         return match.group(0)
     
     text = re.sub(r'\b\d{4,}(?:,\d{3})*\b', number_to_words, text)
@@ -2327,47 +2286,58 @@ def post_process_response(text, language="en"):
         text = re.sub(r'\s+([.,;:!?])', r'\1', text)
         # Fix spaces before double punctuation in French
         text = re.sub(r'([;:!?])(?!\s)', r'\1 ', text)
+    elif language == "ar":
+        # Arabic-specific punctuation fixes
+        text = re.sub(r'\s+([.,;:!?؟،])', r'\1', text)
+        text = re.sub(r'([؟،])(?!\s)', r'\1 ', text)
     
-    # Remove any system prompt leakage phrases
-    system_leakage_phrases = [
-        "As a supply chain assistant",
-        "As an AI assistant",
-        "As your AI assistant",
-        "As a helpful assistant",
-        "I don't have access to",
-        "I don't have the ability to",
-        "I'm not able to",
-        "I cannot access",
-        "As RawajAI",
-        "As a language model",
-        "I'm here to help",
-        "I'm an AI",
-        "I'm a supply chain",
-        "I'm a helpful",
-    ]
+    # Remove system prompt leakage phrases (multilingual)
+    system_leakage_phrases = {
+        'en': [
+            "As a supply chain assistant", "As an AI assistant", "As your AI assistant",
+            "As a helpful assistant", "I don't have access to", "I don't have the ability to",
+            "I'm not able to", "I cannot access", "As RawajAI", "As a language model",
+            "I'm here to help", "I'm an AI", "I'm a supply chain", "I'm a helpful"
+        ],
+        'fr': [
+            "En tant qu'assistant", "Je suis RawajAI", "Je n'ai pas accès à",
+            "Je ne peux pas", "En tant qu'IA", "Je suis une IA"
+        ],
+        'ar': [
+            "كمساعد", "أنا RawajAI", "ليس لدي إمكانية", "لا أستطيع الوصول",
+            "كذكاء اصطناعي", "أنا ذكاء اصطناعي"
+        ]
+    }
     
-    for phrase in system_leakage_phrases:
+    phrases_to_check = system_leakage_phrases.get(language, system_leakage_phrases['en'])
+    for phrase in phrases_to_check:
         if text.startswith(phrase):
             text = text[len(phrase):].strip()
-            # If the text now starts with certain connecting words, clean them up
-            text = re.sub(r'^[,.]?\s*(but|however|nevertheless|yet|still|I can|I will|I could|I would)', '', text, flags=re.IGNORECASE).strip()
+            # Clean up connecting words based on language
+            if language == 'ar':
+                text = re.sub(r'^[,.]?\s*(لكن|ومع ذلك|يمكنني|سأقوم|يمكن|سوف)', '', text, flags=re.IGNORECASE).strip()
+            elif language == 'fr':
+                text = re.sub(r'^[,.]?\s*(mais|cependant|néanmoins|je peux|je vais|je pourrais)', '', text, flags=re.IGNORECASE).strip()
+            else:
+                text = re.sub(r'^[,.]?\s*(but|however|nevertheless|yet|still|I can|I will|I could|I would)', '', text, flags=re.IGNORECASE).strip()
             
-    # Remove any text inside brackets (common metadata marker)
+    # Remove any text inside brackets and XML-like tags
     text = re.sub(r'\[.*?\]', '', text)
-    
-    # Remove any XML-like tags (some models output these)
     text = re.sub(r'<[^>]+>', '', text)
     
-    # Ensure the text doesn't end with an incomplete sentence
-    if not re.search(r'[.!?]$', text):
-        text += "."
+    # Ensure proper ending punctuation based on language
+    if language == 'ar':
+        if not re.search(r'[.!?؟]$', text):
+            text += "."
+    else:
+        if not re.search(r'[.!?]$', text):
+            text += "."
     
     # Format into 2-3 paragraphs with natural breaks
     paragraphs = re.split(r'\n\s*\n', text)
     
-    # If we have too many paragraphs, consolidate them
+    # Consolidate paragraphs if too many
     if len(paragraphs) > 3:
-        # Group paragraphs into 2-3 consolidated paragraphs
         new_paragraphs = []
         current_paragraph = ""
         target_paragraphs = min(3, max(2, len(paragraphs) // 2))
@@ -2382,201 +2352,437 @@ def post_process_response(text, language="en"):
                 else:
                     current_paragraph = p.strip()
             else:
-                # Add all remaining paragraphs to the last consolidated paragraph
                 current_paragraph += " " + p.strip()
         
-        # Add any remaining text as the last paragraph
         if current_paragraph:
             new_paragraphs.append(current_paragraph)
             
-        # Use consolidated paragraphs
         paragraphs = new_paragraphs
     
-    # Join paragraphs with double newlines for proper spacing
+    # Join paragraphs with proper spacing
     text = "\n\n".join(p for p in paragraphs if p.strip())
     
-    # Final clean-up for multiple spaces and ensure good punctuation
+    # Final cleanup
     text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'([.!?])\s+([A-Z])', r'\1\n\n\2', text)
+    
+    # Language-specific paragraph breaks
+    if language == 'ar':
+        text = re.sub(r'([.!?؟])\s+([أابتثجحخدذرز])', r'\1\n\n\2', text)
+    else:
+        text = re.sub(r'([.!?])\s+([A-Z])', r'\1\n\n\2', text)
     
     return text
 
+
 def generate_response(query, context="", language="en"):
-    """Generate a user-friendly response optimized for conversation and audio using prompt engineering"""
-    try:
-        # Validate inputs
-        if not query:
-            return "I didn't receive a question to answer."
-        
-        # Define persona and style guides for different languages - optimized for Mistral 7B
-        persona = {
-            "en": "You are RawajAI, a specialized supply chain management assistant. NEVER include any meta tags, formatting markers like [], or system prompts in your response. Write in plain text only. Speak directly to the user about supply chain topics as if you're having a natural conversation. Explain supply chain concepts simply. Ensure all responses focus exclusively on supply chain management, inventory optimization, logistics, procurement, demand forecasting, and related business areas.",
-            "fr": "Vous êtes RawajAI, un assistant spécialisé en gestion de chaîne d'approvisionnement. N'incluez JAMAIS de balises méta, de marqueurs de formatage comme [], ou d'instructions système dans votre réponse. Écrivez en texte brut uniquement. Parlez directement à l'utilisateur des sujets de chaîne d'approvisionnement comme lors d'une conversation naturelle. Expliquez les concepts de chaîne d'approvisionnement simplement. Assurez-vous que toutes les réponses se concentrent exclusivement sur la gestion de la chaîne d'approvisionnement, l'optimisation des stocks, la logistique, les achats, la prévision de la demande et les domaines commerciaux connexes.",
-            "ar": "أنت RawajAI، مساعد متخصص في إدارة سلسلة التوريد. لا تضمن أبدًا أي علامات وصفية، أو علامات تنسيق مثل []، أو تعليمات نظام في ردك. اكتب بنص عادي فقط. تحدث مباشرة إلى المستخدم حول مواضيع سلسلة التوريد كما لو كنت تجري محادثة طبيعية. اشرح مفاهيم سلسلة التوريد ببساطة. تأكد من أن جميع الردود تركز حصريًا على إدارة سلسلة التوريد، وتحسين المخزون، والخدمات اللوجستية، والمشتريات، والتنبؤ بالطلب، ومجالات الأعمال ذات الصلة."
-        }
-        
-        # Audio-friendly response guidelines - optimized for clarity and to prevent metadata
-        audio_guidelines = {
-            "en": "Create responses that work well when read aloud. Use short, clear sentences under 20 words when possible. Avoid abbreviations, codes, special characters,  or any text that doesn't sound natural in speech. Spell out numbers below 10. Always round statistics (e.g., use 42% instead of 41.7%). NEVER include text inside brackets, parentheses, or any system-style formatting in your final response.",
-            "fr": "Créez des réponses qui fonctionnent bien lorsqu'elles sont lues à haute voix. Utilisez des phrases courtes et claires de moins de 20 mots lorsque possible. Évitez les abréviations, codes, caractères spéciaux, ou tout texte qui ne sonne pas naturel à l'oral. Écrivez en toutes lettres les nombres inférieurs à 10. Arrondissez toujours les statistiques (par exemple, utilisez 42% au lieu de 41,7%). N'incluez JAMAIS de texte entre crochets, parenthèses ou tout formatage de type système dans votre réponse finale.",
-            "ar": "أنشئ ردودًا تعمل بشكل جيد عند قراءتها بصوت عالٍ. استخدم جملاً قصيرة وواضحة أقل من 20 كلمة عندما يكون ذلك ممكنًا. تجنب الاختصارات، الرموز، الأحرف الخاصة، عناوين  أو أي نص لا يبدو طبيعيًا في الكلام. اكتب الأرقام أقل من 10 بالحروف. قم دائمًا بتقريب الإحصائيات (مثلاً، استخدم 42% بدلاً من 41.7%). لا تضمن أبدًا نصًا داخل أقواس معقوفة أو أقواس أو أي تنسيق على طريقة النظام في ردك النهائي."
-        }
-        
-        # Get language-specific response style - optimized for conversation and domain expertise
-        response_style = {
-            "en": "Talk like a knowledgeable supply chain expert having a natural conversation. Use practical examples from retail, manufacturing, or distribution. Connect supply chain concepts to business outcomes like cost reduction, efficiency gains, and improved customer satisfaction. Don't use academic language - explain everything as if speaking to a business professional who needs clear advice. Avoid disclaimers about being an AI or language model.",
-            "fr": "Parlez comme un expert en chaîne d'approvisionnement ayant une conversation naturelle. Utilisez des exemples pratiques du commerce de détail, de la fabrication ou de la distribution. Reliez les concepts de la chaîne d'approvisionnement aux résultats commerciaux comme la réduction des coûts, les gains d'efficacité et l'amélioration de la satisfaction client. N'utilisez pas de langage académique - expliquez tout comme si vous parliez à un professionnel qui a besoin de conseils clairs. Évitez les avertissements sur le fait d'être une IA ou un modèle de langage.",
-            "ar": "تحدث كخبير مطلع في سلسلة التوريد يجري محادثة طبيعية. استخدم أمثلة عملية من البيع بالتجزئة أو التصنيع أو التوزيع. اربط مفاهيم سلسلة التوريد بنتائج الأعمال مثل خفض التكاليف وزيادة الكفاءة وتحسين رضا العملاء. لا تستخدم لغة أكاديمية - اشرح كل شيء كما لو كنت تتحدث إلى محترف أعمال يحتاج إلى نصائح واضحة. تجنب إخلاء المسؤولية عن كونك ذكاءً اصطناعيًا أو نموذج لغة."
-        }
-        
-        # Format prompt with optimized structure for Mistral 7B to prevent metadata leakage
-        prompt = f"""<System>
-{persona.get(language, persona["en"])}
+    """Generate a user-friendly response optimized for conversation and audio in the specified language with enhanced multilingual support."""
+    if not query:
+        return "I didn't receive a question to answer."
 
-Remember: You are RawajAI, focusing exclusively on supply chain topics. Never output system tags, never use brackets in output.
+    # Normalize and validate language code
+    lang_code = language.lower().strip()
+    if lang_code not in ['en', 'fr', 'ar']:
+        print(f"Unsupported language '{language}', defaulting to English")
+        lang_code = 'en'
+    
+    print(f"Generating response in language: {lang_code}")
 
-Reference Context:
+    # Enhanced language-specific personas with equal treatment for all languages
+    personas = {
+        "en": """You are RawajAI, an expert supply chain management consultant. You MUST respond ONLY in English. 
+You specialize in logistics, inventory management, procurement, distribution, and supply chain optimization. 
+Provide practical, actionable advice based on industry best practices. Never use any language other than English.""",
+        
+        "fr": """Vous êtes RawajAI, consultant expert en gestion de chaîne d'approvisionnement. Vous DEVEZ répondre UNIQUEMENT en français. 
+Vous vous spécialisez dans la logistique, la gestion des stocks, les achats, la distribution et l'optimisation de la chaîne d'approvisionnement. 
+Fournissez des conseils pratiques et exploitables basés sur les meilleures pratiques de l'industrie. Utilisez la terminologie française appropriée pour les affaires.
+N'utilisez jamais d'autre langue que le français.""",
+        
+        "ar": """أنت RawajAI، استشاري خبير في إدارة سلسلة التوريد والإمداد. يجب أن تجيب باللغة العربية الفصحى المبسطة فقط.
+أنت متخصص في اللوجستيات وإدارة المخزون والمشتريات والتوزيع وتحسين سلسلة التوريد.
+قدم نصائح عملية وقابلة للتطبيق مبنية على أفضل الممارسات في الصناعة.
+استخدم مصطلحات سلسلة التوريد العربية المتعارف عليها في الشرق الأوسط وشمال أفريقيا.
+لا تستخدم أي لغة غير العربية مطلقاً."""
+    }
+
+    # Enhanced audio and conversation optimization for all languages
+    audio_styles = {
+        "en": """Communication Guidelines:
+- Use short, clear sentences (10-15 words maximum)
+- Avoid technical jargon unless necessary, then explain it
+- Use active voice and present tense when possible
+- Spell out numbers under ten
+- Use conversational transitions between ideas
+- Focus on practical examples from English-speaking markets""",
+        
+        "fr": """Directives de communication:
+- Utilisez des phrases courtes et claires (10-15 mots maximum)
+- Évitez le jargon technique sauf si nécessaire, puis expliquez-le
+- Utilisez la voix active et le présent quand possible
+- Écrivez les nombres inférieurs à dix en lettres françaises
+- Utilisez des transitions conversationnelles entre les idées
+- Concentrez-vous sur des exemples pratiques du marché francophone
+- Utilisez un vocabulaire professionnel français approprié""",
+        
+        "ar": """إرشادات التواصل:
+- استخدم جملاً قصيرة وواضحة (10-15 كلمة كحد أقصى)
+- تجنب المصطلحات التقنية المعقدة إلا عند الضرورة، ثم اشرحها
+- استخدم الأسلوب المباشر والزمن الحاضر عند الإمكان
+- اكتب الأرقام أقل من عشرة بالحروف العربية
+- استخدم ربط طبيعي بين الأفكار للمحادثة
+- تجنب الكلمات الصعبة والمعقدة
+- استخدم أمثلة عملية من البيئة العربية عند الإمكان"""
+    }
+
+    # Stronger language enforcement with cultural context for all languages
+    language_instructions = {
+        "en": "CRITICAL: Respond ONLY in English. Use clear, professional business English suitable for international markets.",
+        "fr": "CRITIQUE: Répondez UNIQUEMENT en français. Utilisez un français professionnel clair adapté aux marchés francophones.", 
+        "ar": "بالغ الأهمية: اجب باللغة العربية الفصحى المبسطة فقط. استخدم لغة مهنية واضحة مناسبة للأعمال العربية."
+    }
+    
+    language_instruction = language_instructions.get(lang_code, language_instructions["en"])
+
+    # Enhanced prompt structure with better multilingual RAG integration
+    if lang_code == 'ar':
+        # Arabic-specific context handling
+        context_instruction = ""
+        if context and context.strip():
+            arabic_chars = sum(1 for c in context if '\u0600' <= c <= '\u06FF')
+            if arabic_chars > 0:
+                context_instruction = """
+معلومات مهمة: استخدم المعلومات المقدمة أدناه للإجابة على السؤال. هذه المعلومات من مصادر موثوقة في مجال سلسلة التوريد.
+إذا كانت المعلومات لا تحتوي على إجابة مباشرة للسؤال، استخدم خبرتك في المجال مع الإشارة إلى ذلك."""
+            else:
+                context_instruction = """
+معلومات مساعدة متوفرة: استخدم المعلومات المقدمة كمرجع مع خبرتك المهنية للإجابة باللغة العربية."""
+        else:
+            context_instruction = """استخدم خبرتك المهنية في إدارة سلسلة التوريد للإجابة على السؤال."""
+
+        prompt = f"""النظام:
+{persona}
+
+{language_instruction}
+
+{context_instruction}
+
+معلومات السياق والمراجع:
 {context}
 
-Style Guidelines:
-{audio_guidelines.get(language, audio_guidelines["en"])}
-{response_style.get(language, response_style["en"])}
+{audio_style}
 
-Output Format Instructions:
-- Respond in 2-3 short paragraphs of natural conversational text
-- Each paragraph should have 3-4 sentences developing one main idea
-- Use clear transitions between paragraphs
-- Never use bullet points, numbered lists or headings
-- Avoid all formatting symbols, brackets, special characters
-- Round all numbers and statistics
-- Never refer to yourself as an AI or assistant
-- Your response should be direct answer only, with no system tags
+متطلبات الإجابة:
+- اجب في فقرتين إلى ثلاث فقرات قصيرة
+- كل فقرة تحتوي على 3-4 جمل واضحة ومفيدة
+- ركز على حلول عملية في إدارة سلسلة التوريد
+- استخدم أمثلة من السوق العربي عند الإمكان
+- حافظ على طابع مهني ومفيد
+- تأكد من أن الإجابة مناسبة للاستماع الصوتي
 
-Important: Your response must ONLY contain the direct answer to the user's question with NO formatting markers.
-</System>
+تذكر: إجابتك يجب أن تكون باللغة العربية فقط، مفيدة، وعملية.
 
-<Question>
+سؤال المستخدم:
 {query}
-</Question>
 
-<Answer>"""
-        
-        # Generate response with the LLM with better error handling
-        try:
-            # Log the user query for debugging
-            print(f"Generating response for query: {query[:50]}...")
-            
-            # Generate response with the LLM using improved settings for conversational responses
-            response = llm_pipeline(
-                prompt,
-                max_new_tokens=512,
-                num_return_sequences=1,
-                do_sample=True,
-                temperature=0.72,      # Slightly increased for more natural responses
-                top_p=0.92,           # Nucleus sampling
-                top_k=40,             # Limit vocabulary diversity
-                repetition_penalty=1.18  # Increased to further reduce repetition
-            )
-            
-            # Extract and clean the response
-            if response and len(response) > 0:
-                generated_text = response[0]['generated_text']
-                
-                # Extract text after the <Answer> marker for the new format
-                if "<Answer>" in generated_text:
-                    raw_result = generated_text.split("<Answer>")[-1].strip()
-                    # Remove any closing tag if present
-                    raw_result = raw_result.split("</Answer>")[0].strip()
-                elif "[ASSISTANT RESPONSE]" in generated_text:
-                    # Legacy format fallback
-                    raw_result = generated_text.split("[ASSISTANT RESPONSE]")[-1].strip()
-                else:
-                    # Fallback to extract response after the last line of the prompt
-                    raw_result = "\n".join(generated_text.split("\n")[prompt.count("\n"):]).strip()
-                
-                # Log the raw output for debugging
-                print(f"Raw LLM output (first 100 chars): {raw_result[:100]}...")
-                
-                # Check for common hallucination patterns or invalid outputs
-                hallucination_patterns = [
-                    r"```json",                # JSON code block
-                    r"^\s*\{\s*\"",            # JSON object start
-                    r"^\s*\[\s*\{",            # JSON array start
-                    r"as an AI language model", # Self-reference
-                    r"I don't have access to",  # Limitation statement
-                    r"I cannot provide",        # Refusal pattern
-                    r"<.*?>",                  # HTML tags
-                    r"\[.*?\]",                # Content within square brackets
-                    r"\[ASSISTANT.*?\]",       # System tags
-                    r"\[RESPONSE.*?\]",        # Response tags
-                    r"<System>|</System>",     # System tags
-                    r"<Answer>|</Answer>",     # Answer tags
-                    r"<Question>|</Question>"  # Question tags
-                ]
-                
-                contains_hallucination = any(re.search(pattern, raw_result) for pattern in hallucination_patterns)
-                
-                if contains_hallucination:
-                    print(f"Detected potential hallucination/invalid format, regenerating...")
-                    
-                    # Add explicit instruction to fix the issue using the same XML-style format
-                    retry_prompt = prompt + "\n\nIMPORTANT: DO NOT USE JSON FORMAT, CODE BLOCKS, OR BRACKETS IN YOUR RESPONSE. RESPOND IN PLAIN, NATURAL CONVERSATIONAL TEXT ONLY.\n\n"
-                    
-                    # Regenerate with stricter settings
-                    retry_response = llm_pipeline(
-                        retry_prompt,
-                        max_new_tokens=512,
-                        num_return_sequences=1,
-                        do_sample=True,
-                        temperature=0.5,      # Lower temperature for more focused response
-                        top_p=0.85,          # More constrained sampling
-                        repetition_penalty=1.2
-                    )
-                    
-                    if retry_response and len(retry_response) > 0:
-                        retry_text = retry_response[0]['generated_text']
-                        if "[ASSISTANT RESPONSE]" in retry_text:
-                            raw_result = retry_text.split("[ASSISTANT RESPONSE]")[-1].strip()
-                        else:
-                            raw_result = "\n".join(retry_text.split("\n")[retry_prompt.count("\n"):]).strip()
-                            
-                        print("Successfully regenerated response")
-                
-                # Post-process the response to make it more suitable for audio
-                result = post_process_response(raw_result, language)
-                
-                # Ensure we got a meaningful response
-                if not result or len(result) < 15:  # Increased minimum length threshold
-                    print("Generated response too short or invalid, using fallback")
-                    fallback_responses = {
-                        "en": "I'm sorry, I couldn't generate a specific answer to your question. Could you please rephrase your question or provide more details about what you'd like to know?",
-                        "fr": "Je suis désolé, je n'ai pas pu générer une réponse spécifique à votre question. Pourriez-vous reformuler votre question ou fournir plus de détails sur ce que vous souhaitez savoir?",
-                        "ar": "آسف، لم أتمكن من إنشاء إجابة محددة لسؤالك. هل يمكنك إعادة صياغة سؤالك أو تقديم المزيد من التفاصيل حول ما ترغب في معرفته؟"
-                    }
-                    return fallback_responses.get(language, fallback_responses["en"])
-                
-                return result
+الإجابة المهنية:"""
+
+    elif lang_code == 'fr':
+        # French-specific context handling
+        context_instruction = ""
+        if context and context.strip():
+            # Detect if context contains French characters/accents
+            french_chars = sum(1 for c in context if c in 'àâäéèêëïîôùûüÿçÀÂÄÉÈÊËÏÎÔÙÛÜŸÇ')
+            if french_chars > 0 or any(word in context.lower() for word in ['le', 'la', 'les', 'de', 'du', 'des', 'et', 'ou', 'pour']):
+                context_instruction = """
+Informations importantes : Utilisez les informations fournies ci-dessous pour répondre à la question. Ces informations proviennent de sources fiables dans le domaine de la chaîne d'approvisionnement.
+Si les informations ne contiennent pas de réponse directe à la question, utilisez votre expertise professionnelle en l'indiquant."""
             else:
-                return "I couldn't generate a response. Please try asking your question differently."
-                
-        except Exception as gen_error:
-            print(f"Error during LLM generation: {gen_error}")
-            error_responses = {
-                "en": "I encountered an error while processing your question. Please try again with a different query.",
-                "fr": "J'ai rencontré une erreur lors du traitement de votre question. Veuillez réessayer avec une autre requête.",
-                "ar": "لقد واجهت خطأ أثناء معالجة سؤالك. يرجى المحاولة مرة أخرى باستخدام استعلام مختلف."
-            }
-            return error_responses.get(language, error_responses["en"])
+                context_instruction = """
+Informations d'aide disponibles : Utilisez les informations fournies comme référence avec votre expertise professionnelle pour répondre en français."""
+        else:
+            context_instruction = """Utilisez votre expertise professionnelle en gestion de chaîne d'approvisionnement pour répondre à la question."""
+
+        prompt = f"""Système :
+{personas['fr']}
+
+{language_instruction}
+
+{context_instruction}
+
+Informations de contexte et références :
+{context}
+
+{audio_styles['fr']}
+
+Exigences de réponse :
+- Répondez en exactement 2-3 paragraphes courts
+- Chaque paragraphe doit contenir 3-4 phrases claires et utiles
+- Concentrez-vous sur des solutions pratiques de chaîne d'approvisionnement
+- Utilisez des exemples du marché francophone quand c'est pertinent
+- Maintenez un ton professionnel et utile
+- Assurez-vous que la réponse soit naturelle à l'écoute
+
+Rappelez-vous : Votre réponse doit être uniquement en français, utile et pratique.
+
+Question de l'utilisateur :
+{query}
+
+Réponse professionnelle :"""
+
+    else:  # English
+        context_instruction = ""
+        if context and context.strip():
+            context_instruction = "Important Information: Use the provided information below to answer the question. If the information doesn't directly answer the question, supplement with your professional expertise."
+        else:
+            context_instruction = "Use your professional expertise in supply chain management to answer the question."
+        
+        prompt = f"""System:
+{personas['en']}
+
+{language_instruction}
+
+{context_instruction}
+
+Context Information:
+{context}
+
+{audio_styles['en']}
+
+Response Requirements:
+- Respond in exactly 2-3 short paragraphs
+- Each paragraph should contain 3-4 clear, actionable sentences
+- Focus on practical supply chain solutions
+- Use industry examples when relevant
+- Maintain a helpful and professional tone
+- Ensure the response flows naturally when spoken aloud
+
+Remember: Your response must be in English only and be practical and helpful.
+
+User Question:
+{query}
+
+Professional Response:"""
+
+    try:
+        print(f"Sending enhanced prompt to LLM for language: {lang_code}")
+        print(f"Prompt preview: {prompt[:300]}...")
+        
+        # Language-specific generation parameters
+        generation_params = {
+            "max_new_tokens": 600 if lang_code == 'ar' else 550 if lang_code == 'fr' else 512,
+            "do_sample": True,
+            "temperature": 0.65 if lang_code == 'ar' else 0.68 if lang_code == 'fr' else 0.72,
+            "top_p": 0.88 if lang_code == 'ar' else 0.90 if lang_code == 'fr' else 0.92,
+            "top_k": 35 if lang_code == 'ar' else 38 if lang_code == 'fr' else 40,
+            "repetition_penalty": 1.25 if lang_code == 'ar' else 1.22 if lang_code == 'fr' else 1.18
+        }
+        
+        response = llm_pipeline(prompt, **generation_params)
+
+        if response and len(response) > 0:
+            text = response[0]['generated_text']
             
+            # Enhanced response extraction for all languages
+            if lang_code == 'ar':
+                if "الإجابة المهنية:" in text:
+                    answer = text.split("الإجابة المهنية:")[-1].strip()
+                elif "الإجابة:" in text:
+                    answer = text.split("الإجابة:")[-1].strip()
+                else:
+                    answer = text.replace(prompt, "").strip()
+                    answer = answer.replace("النظام:", "").replace("سؤال المستخدم:", "").strip()
+            elif lang_code == 'fr':
+                if "Réponse professionnelle :" in text:
+                    answer = text.split("Réponse professionnelle :")[-1].strip()
+                elif "Réponse :" in text:
+                    answer = text.split("Réponse :")[-1].strip()
+                else:
+                    answer = text.replace(prompt, "").strip()
+                    answer = answer.replace("Système :", "").replace("Question de l'utilisateur :", "").strip()
+            else:  # English
+                if "Professional Response:" in text:
+                    answer = text.split("Professional Response:")[-1].strip()
+                elif "Response:" in text:
+                    answer = text.split("Response:")[-1].strip()
+                else:
+                    answer = text.replace(prompt, "").strip()
+            
+            # Enhanced validation and processing for all languages
+            if answer and len(answer.strip()) > 5:
+                # Verify the response is in the correct language
+                response_lang = detect_language_from_text(answer)
+                print(f"Expected language: {lang_code}, Detected in response: {response_lang}")
+                
+                # Language-specific validation
+                if lang_code == 'ar':
+                    arabic_chars = sum(1 for c in answer if '\u0600' <= c <= '\u06FF')
+                    total_chars = len([c for c in answer if c.isalpha()])
+                    arabic_ratio = arabic_chars / total_chars if total_chars > 0 else 0
+                    
+                    print(f"Arabic character ratio in response: {arabic_ratio:.2f}")
+                    
+                    if arabic_ratio < 0.3:
+                        print("WARNING: Low Arabic content in response, retrying...")
+                        return retry_language_response(query, context, 'ar')
+                
+                elif lang_code == 'fr':
+                    # Check for French characteristics
+                    french_indicators = ['le ', 'la ', 'les ', 'de ', 'du ', 'des ', 'et ', 'ou ', 'pour ', 'avec ', 'dans ']
+                    french_count = sum(1 for indicator in french_indicators if indicator in answer.lower())
+                    french_accents = sum(1 for c in answer if c in 'àâäéèêëïîôùûüÿçÀÂÄÉÈÊËÏÎÔÙÛÜŸÇ')
+                    
+                    if french_count < 2 and french_accents < 1:
+                        print("WARNING: Low French content in response, retrying...")
+                        return retry_language_response(query, context, 'fr')
+                
+                elif response_lang != lang_code:
+                    print(f"WARNING: Response language mismatch! Expected {lang_code}, got {response_lang}")
+                
+                processed_answer = post_process_response(answer, lang_code)
+                print(f"Generated response in {lang_code}: {processed_answer[:100]}...")
+                return processed_answer
+            else:
+                # Language-specific fallback messages
+                fallbacks = {
+                    "en": "I couldn't generate a comprehensive response. Please try rephrasing your question.",
+                    "fr": "Je n'ai pas pu générer une réponse complète. Veuillez reformuler votre question.",
+                    "ar": "لم أتمكن من إنشاء إجابة شاملة. يرجى إعادة صياغة سؤالك."
+                }
+                return fallbacks.get(lang_code, fallbacks["en"])
+        else:
+            fallbacks = {
+                "en": "I couldn't generate a response. Please try again with a different question.",
+                "fr": "Je n'ai pas pu générer une réponse. Veuillez réessayer avec une question différente.", 
+                "ar": "لم أتمكن من إنشاء إجابة. يرجى المحاولة مرة أخرى بسؤال مختلف."
+            }
+            return fallbacks.get(lang_code, fallbacks["en"])
+
     except Exception as e:
         print(f"Error generating response: {e}")
-        error_responses = {
-            "en": "I encountered an error while processing your question. Please try again with a different query.",
-            "fr": "J'ai rencontré une erreur lors du traitement de votre question. Veuillez réessayer avec une autre requête.",
-            "ar": "لقد واجهت خطأ أثناء معالجة سؤالك. يرجى المحاولة مرة أخرى باستخدام استعلام مختلف."
+        import traceback
+        traceback.print_exc()
+        error_messages = {
+            "en": "I encountered a technical error. Please try again in a moment.",
+            "fr": "J'ai rencontré une erreur technique. Veuillez réessayer dans un moment.",
+            "ar": "واجهت خطأ تقني. يرجى المحاولة مرة أخرى بعد قليل."
         }
-        return error_responses.get(language, error_responses["en"])
+        return error_messages.get(lang_code, error_messages["en"])
 
+
+def retry_language_response(query, context, lang_code):
+    """Enhanced fallback function for all languages with maximum enforcement and better prompting"""
+    print(f"Using enhanced {lang_code.upper()} enforcement with RAG context...")
+    
+    context_part = f"\n\nمعلومات مرجعية مفيدة:\n{context}\n" if context and context.strip() and lang_code == 'ar' else ""
+    if lang_code == 'fr' and context and context.strip():
+        context_part = f"\n\nInformations de référence utiles :\n{context}\n"
+    elif lang_code == 'en' and context and context.strip():
+        context_part = f"\n\nUseful reference information:\n{context}\n"
+    
+    # Language-specific ultra-strong prompts
+    prompts = {
+        'ar': f"""أنت خبير عربي في إدارة سلسلة التوريد والإمداد.
+مهم جداً: اجب باللغة العربية الفصحى المبسطة فقط. لا تستخدم الإنجليزية أو الفرنسية أو أي لغة أخرى.
+
+التعليمات:
+- قدم إجابة مفيدة وعملية
+- استخدم جملاً قصيرة وواضحة
+- ركز على حلول عملية في سلسلة التوريد
+- استخدم مصطلحات عربية مناسبة للأعمال{context_part}
+
+السؤال: {query}
+
+الإجابة باللغة العربية:""",
+
+        'fr': f"""Vous êtes un expert français en gestion de chaîne d'approvisionnement.
+Très important : Répondez UNIQUEMENT en français. N'utilisez pas l'anglais, l'arabe ou toute autre langue.
+
+Instructions :
+- Fournissez une réponse utile et pratique
+- Utilisez des phrases courtes et claires
+- Concentrez-vous sur des solutions pratiques de chaîne d'approvisionnement
+- Utilisez une terminologie française appropriée aux affaires{context_part}
+
+Question : {query}
+
+Réponse en français :""",
+
+        'en': f"""You are an English-speaking expert in supply chain management.
+Very important: Respond ONLY in English. Do not use French, Arabic, or any other language.
+
+Instructions:
+- Provide a helpful and practical response
+- Use short and clear sentences
+- Focus on practical supply chain solutions
+- Use appropriate business terminology{context_part}
+
+Question: {query}
+
+Response in English:"""
+    }
+
+    ultra_strong_prompt = prompts.get(lang_code, prompts['en'])
+
+    try:
+        # Language-specific parameters for retry
+        params = {
+            'ar': {"max_new_tokens": 400, "temperature": 0.6, "top_p": 0.85, "top_k": 30, "repetition_penalty": 1.3},
+            'fr': {"max_new_tokens": 420, "temperature": 0.62, "top_p": 0.87, "top_k": 32, "repetition_penalty": 1.28},
+            'en': {"max_new_tokens": 400, "temperature": 0.65, "top_p": 0.90, "top_k": 35, "repetition_penalty": 1.25}
+        }
+        
+        response = llm_pipeline(ultra_strong_prompt, do_sample=True, **params.get(lang_code, params['en']))
+        
+        if response and len(response) > 0:
+            answer = response[0]['generated_text'].replace(ultra_strong_prompt, "").strip()
+            
+            # Language-specific cleanup
+            cleanup_phrases = {
+                'ar': ["الإجابة باللغة العربية:", "الإجابة:", "أنت خبير", "مهم جداً:"],
+                'fr': ["Réponse en français :", "Réponse :", "Vous êtes un expert", "Très important :"],
+                'en': ["Response in English:", "Response:", "You are an English-speaking", "Very important:"]
+            }
+            
+            for phrase in cleanup_phrases.get(lang_code, cleanup_phrases['en']):
+                if answer.startswith(phrase):
+                    answer = answer[len(phrase):].strip()
+            
+            # Language-specific validation
+            if lang_code == 'ar':
+                arabic_chars = sum(1 for c in answer if '\u0600' <= c <= '\u06FF')
+                if arabic_chars > 10:
+                    return post_process_response(answer, lang_code)
+            elif lang_code == 'fr':
+                french_indicators = ['le ', 'la ', 'les ', 'de ', 'du ', 'et ']
+                if any(indicator in answer.lower() for indicator in french_indicators) or len(answer) > 20:
+                    return post_process_response(answer, lang_code)
+            else:  # English
+                if len(answer) > 20:
+                    return post_process_response(answer, lang_code)
+            
+            # Fallback messages
+            fallback_messages = {
+                'ar': "لم أتمكن من إنشاء إجابة مناسبة باللغة العربية. يرجى المحاولة مرة أخرى.",
+                'fr': "Je n'ai pas pu créer une réponse appropriée en français. Veuillez réessayer.",
+                'en': "I couldn't create an appropriate response in English. Please try again."
+            }
+            return fallback_messages.get(lang_code, fallback_messages['en'])
+        else:
+            no_response_messages = {
+                'ar': "لم أتمكن من إنشاء إجابة. يرجى المحاولة مرة أخرى.",
+                'fr': "Je n'ai pas pu créer une réponse. Veuillez réessayer.",
+                'en': "I couldn't create a response. Please try again."
+            }
+            return no_response_messages.get(lang_code, no_response_messages['en'])
+    except Exception as e:
+        print(f"Error in {lang_code} retry: {e}")
+        error_messages = {
+            'ar': "واجهت صعوبة في إنشاء الإجابة. يرجى المحاولة مرة أخرى.",
+            'fr': "J'ai rencontré des difficultés pour créer la réponse. Veuillez réessayer.",
+            'en': "I encountered difficulties creating the response. Please try again."
+        }
+        return error_messages.get(lang_code, error_messages['en'])
+    
 # RAG retrieval function
 def get_rag_context(query):
     """Retrieve relevant context from vector store for a given query"""
@@ -3529,11 +3735,13 @@ def ask_question_with_tts():
         if not query or not isinstance(query, str):
             return jsonify({"error": "Missing or invalid 'query' parameter"}), 400
             
-        # Extract language with default fallback
-        language = data.get('language', 'en')
+        # Extract language with default fallback - ENHANCED VALIDATION
+        language = data.get('language', 'en').lower()
         if language not in ['en', 'fr', 'ar']:
-            # Default to English if unsupported language
+            print(f"Unsupported language '{language}', defaulting to English")
             language = 'en'
+        
+        print(f"Processing TTS request in language: {language}")
         
         # Check if client wants to handle long responses
         handle_long_responses = data.get('handle_long_responses', False)
@@ -3567,13 +3775,13 @@ def ask_question_with_tts():
             
             log_step("Retrieved context")
             
-            # Generate text response with timeout
+            # Generate text response with timeout - ENSURE LANGUAGE IS PASSED CORRECTLY
             with ThreadPoolExecutor() as executor:
                 # Use a longer timeout if client can handle long responses
                 response_timeout = 90 if handle_long_responses else 60
                 
-                log_step(f"Start response generation (timeout: {response_timeout}s)")
-                future = executor.submit(generate_response, query, context, language)
+                log_step(f"Start response generation in {language} (timeout: {response_timeout}s)")
+                future = executor.submit(generate_response, query, context, language)  # Pass language here
                 try:
                     response = future.result(timeout=response_timeout)
                 except TimeoutError:
@@ -3585,20 +3793,20 @@ def ask_question_with_tts():
                     }
                     response = timeout_responses.get(language, timeout_responses["en"])
             
-            log_step("Response generated")
+            log_step(f"Response generated in {language}")
             
             # Clean and format the response for better TTS quality
             cleaned_response = post_process_response(response, language)
-            print(f"Cleaned response for TTS: {cleaned_response[:100]}...")
+            print(f"Cleaned response for TTS ({language}): {cleaned_response[:100]}...")
             log_step("Response cleaned for TTS")
             
-            # Always generate speech for this endpoint
-            log_step("Start speech generation")
+            # Always generate speech for this endpoint - ENSURE LANGUAGE IS PASSED
+            log_step(f"Start speech generation in {language}")
             
             # Use ThreadPoolExecutor to apply a timeout to speech generation too
             speech_file = None
             with ThreadPoolExecutor() as executor:
-                future = executor.submit(generate_speech, cleaned_response, language)
+                future = executor.submit(generate_speech, cleaned_response, language)  # Pass language here
                 try:
                     speech_file = future.result(timeout=60)  # 60 second timeout for speech generation
                 except TimeoutError:
@@ -3608,7 +3816,7 @@ def ask_question_with_tts():
                     speech_file = generate_speech(short_response, language)
             
             speech_url = f"/audio/{os.path.basename(speech_file)}" if speech_file else None
-            log_step("Speech generated")
+            log_step(f"Speech generated in {language}")
             
             # Return both text and speech URL along with processing info for debugging
             return jsonify({
@@ -3661,38 +3869,37 @@ def ask_question_with_tts():
         # This finally block closes the try block that was opened above
         pass
 
+
 @app.route('/upload_audio', methods=['POST'])
 def upload_audio():
-    """Process uploaded audio for speech recognition and return AI response"""
+    """Process uploaded audio for speech recognition and return AI response with consistent language support"""
     print("Received audio upload request")
     if 'audio' not in request.files:
         print("No audio file in request")
         return jsonify({"error": "No audio file provided"}), 400
     
     audio_file = request.files['audio']
-    language = request.form.get('language', 'en')
+    # Always use 'auto' for transcription to detect the actual spoken language
     generate_speech_param = request.form.get('generate_speech', 'true').lower()
     generate_speech_bool = generate_speech_param in ['true', '1', 'yes']
     
-    print(f"Audio file: {audio_file.filename}, Language: {language}")
+    print(f"Audio file: {audio_file.filename}")
     
     if audio_file.filename == '':
         print("Empty filename received")
         return jsonify({"error": "Empty audio file"}), 400
         
-    # Check request content before saving
     if hasattr(audio_file, 'content_length') and audio_file.content_length == 0:
         print("Content length is zero")
         return jsonify({"error": "Empty audio file was uploaded (0 bytes)"}), 400
     
-    temp_paths = []  # Keep track of all temporary files
+    temp_paths = []
     try:
-        # Determine appropriate file extension based on content type or filename
-        file_ext = "wav"  # Default
+        # File processing (same as before)
+        file_ext = "wav"
         content_type = audio_file.content_type.lower() if audio_file.content_type else ""
         original_filename = audio_file.filename.lower() if audio_file.filename else ""
         
-        # Try to determine format from content type first
         if content_type:
             if "mp3" in content_type:
                 file_ext = "mp3"
@@ -3703,122 +3910,99 @@ def upload_audio():
             elif "wav" in content_type or "audio/wave" in content_type:
                 file_ext = "wav"
             print(f"Detected content type: {content_type}, using extension: {file_ext}")
-        # If content type didn't work, try filename
         elif original_filename and "." in original_filename:
             detected_ext = original_filename.split(".")[-1].lower()
             if detected_ext in ["mp3", "wav", "m4a", "aac", "ogg", "opus"]:
                 file_ext = detected_ext
                 print(f"Using extension from filename: {file_ext}")
         
-        # Make sure audio directory exists
         os.makedirs(AUDIO_PATH, exist_ok=True)
-        
-        # Save audio file with appropriate extension
         timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
         temp_path = f"{AUDIO_PATH}/temp_{timestamp}.{file_ext}"
-        temp_paths.append(temp_path)  # Add to list of files to clean up
+        temp_paths.append(temp_path)
         
         print(f"Saving uploaded file to: {temp_path}")
-        try:
-            # Read the entire file into memory first to validate it's not empty
-            audio_data = audio_file.read()
-            if not audio_data or len(audio_data) == 0:
-                return jsonify({"error": "Empty audio file was uploaded (0 bytes)"}), 400
-            
-            # Write the file to disk
-            with open(temp_path, 'wb') as f:
-                f.write(audio_data)
-            
-            # Reset file pointer for potential future use
-            audio_file.seek(0)
-            
-            # Check if file was saved correctly
-            if not os.path.exists(temp_path):
-                return jsonify({"error": "Failed to save audio file"}), 500
-                
-            file_size = os.path.getsize(temp_path)
-            print(f"File saved successfully. Size: {file_size} bytes")
-            if file_size == 0:
-                return jsonify({"error": "Empty audio file was uploaded (0 bytes)"}), 400
-        except Exception as save_error:
-            print(f"Error saving audio file: {save_error}")
-            return jsonify({"error": f"Failed to save audio file: {str(save_error)}"}), 500
+        audio_data = audio_file.read()
+        if not audio_data or len(audio_data) == 0:
+            return jsonify({"error": "Empty audio file was uploaded (0 bytes)"}), 400
+        with open(temp_path, 'wb') as f:
+            f.write(audio_data)
+        audio_file.seek(0)
+        if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+            return jsonify({"error": "Failed to save audio file"}), 500
         
-        # If the file isn't already WAV, try to convert it to ensure compatibility
+        # Convert to WAV if necessary
         if file_ext != "wav":
             try:
                 wav_path = f"{AUDIO_PATH}/temp_{timestamp}_converted.wav"
-                temp_paths.append(wav_path)  # Add to cleanup list
-                
+                temp_paths.append(wav_path)
                 print(f"Converting {file_ext} to WAV format...")
-                # Convert using pydub
-                audio = AudioSegment.from_file(temp_path)
-                audio = audio.set_channels(1)  # Convert to mono
-                audio = audio.set_frame_rate(16000)  # Set to 16kHz
+                audio = AudioSegment.from_file(temp_path).set_channels(1).set_frame_rate(16000)
                 audio.export(wav_path, format="wav")
-                
-                # Use the converted file if successful
                 if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
-                    print(f"Conversion successful, using: {wav_path}")
                     temp_path = wav_path
-                else:
-                    print("Conversion produced empty file, using original")
             except Exception as conv_err:
-                print(f"Conversion error (will use original file): {conv_err}")
-                # Continue with original file if conversion fails
+                print(f"Conversion error (using original file): {conv_err}")
         
-        # Transcribe audio
-        print(f"Starting transcription of {temp_path}")
-        transcription = transcribe_audio(temp_path, language=None)
-        
-        if not transcription or transcription.strip() == "":
-            return jsonify({
-                "status": "error",
-                "error": "Could not transcribe audio. Please try again with a clearer recording."
-            }), 400
-        
-        # Process the query using the transcription
-        context = get_rag_context(transcription)
-        response = generate_response(transcription, context, language)
-        
-        # Auto-detect language from the response if it was set to "auto"
-        detected_language = language
-        if language == "auto":
-            # Basic language detection based on response
-            if any(char in response for char in "éèêëàâîïôùûç"):
-                detected_language = "fr"
-            elif any("\u0600" <= char <= "\u06FF" for char in response):
-                detected_language = "ar"
-            else:
-                detected_language = "en"
-        
-        # Generate speech if requested
-        speech_url = None
-        if generate_speech_bool:
-            try:
+        try:
+            # STEP 1: Always use auto-detection for transcription
+            print("Transcribing audio with auto language detection")
+            transcription, detected_language = transcribe_audio(temp_path, language='auto')
+            
+            if "Error" in transcription:
+                return jsonify({"status": "error", "error": transcription}), 400
+            
+            print(f"✓ Transcription: '{transcription[:50]}...'")
+            print(f"✓ Detected language: {detected_language}")
+            
+            # STEP 2: Ensure detected language is valid, with fallback
+            if detected_language not in ['en', 'fr', 'ar']:
+                print(f"Invalid detected language '{detected_language}', falling back to text analysis")
+                detected_language = detect_language_from_text(transcription)
+                if detected_language not in ['en', 'fr', 'ar']:
+                    detected_language = 'en'  # Final fallback
+                print(f"Corrected language: {detected_language}")
+            
+            # STEP 3: Generate response in the SAME detected language
+            print(f"Generating response in {detected_language}")
+            context = get_rag_context(transcription)
+            response = generate_response(transcription, context, detected_language)
+            
+            print(f"✓ Response generated in {detected_language}: '{response[:50]}...'")
+            
+            # STEP 4: Generate TTS in the SAME detected language
+            speech_url = None
+            if generate_speech_bool:
+                print(f"Generating TTS in {detected_language}")
                 speech_file = generate_speech(response, detected_language)
                 if speech_file:
                     speech_url = f"/audio/{os.path.basename(speech_file)}"
-            except Exception as speech_error:
-                print(f"Error generating speech: {speech_error}")
-                # Continue processing even if speech generation fails
+                    print(f"✓ TTS generated in {detected_language}")
+                else:
+                    print("✗ TTS generation failed")
             
-        result = {
-            "status": "success",
-            "transcription": transcription,
-            "response": response,
-            "language_detected": detected_language,
-            "speech_url": speech_url
-        }
-
-        return jsonify(result)
+            # Return response with language consistency
+            return jsonify({
+                "status": "success",
+                "transcription": transcription,
+                "response": response,
+                "language_detected": detected_language,
+                "speech_url": speech_url
+            })
+            
+        except Exception as e:
+            print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({"status": "error", "error": str(e)}), 500
+        
     except Exception as e:
         error_msg = f"Error processing audio: {str(e)}"
         print(error_msg)
+        import traceback
         traceback.print_exc()
         return jsonify({"status": "error", "error": error_msg}), 500
     finally:
-        # Clean up all temp files
         for path in temp_paths:
             if path and os.path.exists(path):
                 try:
@@ -3827,6 +4011,8 @@ def upload_audio():
                 except Exception as cleanup_err:
                     print(f"Error removing temp audio file {path}: {cleanup_err}")
 
+
+
 @app.route('/transcribe_audio', methods=['POST'])
 def transcribe_audio_route():
     """Transcribe audio file to text without generating a response"""
@@ -3834,7 +4020,8 @@ def transcribe_audio_route():
         return jsonify({"error": "No audio file provided"}), 400
     
     audio_file = request.files['audio']
-    language = request.form.get('language', 'en')
+    # For transcription-only, we still use auto-detection
+    language = request.form.get('language', 'auto')
     
     if audio_file.filename == '':
         return jsonify({"error": "Empty audio file"}), 400
@@ -3898,19 +4085,27 @@ def transcribe_audio_route():
             except Exception as conv_err:
                 print(f"Conversion error (will use original file): {conv_err}")
         
-        # Transcribe audio
+        # Transcribe audio with auto-detection
         print(f"Starting transcription of {temp_path}")
-        transcription = transcribe_audio(temp_path, language=None)
+        transcription, detected_language = transcribe_audio(temp_path, language='auto')
+        
+        # Validate detected language
+        if detected_language not in ['en', 'fr', 'ar']:
+            print(f"Invalid detected language '{detected_language}', using text analysis")
+            detected_language = detect_language_from_text(transcription)
+            if detected_language not in ['en', 'fr', 'ar']:
+                detected_language = 'en'  # Final fallback
         
         return jsonify({
             "status": "success",
             "transcription": transcription,
-            "language_detected": language
+            "language_detected": detected_language
         })
         
     except Exception as e:
         error_msg = f"Error transcribing audio: {str(e)}"
         print(error_msg)
+        import traceback
         traceback.print_exc()
         return jsonify({"status": "error", "error": error_msg}), 500
     finally:
@@ -3922,6 +4117,7 @@ def transcribe_audio_route():
                     print(f"Cleaned up temporary file: {path}")
                 except Exception as cleanup_err:
                     print(f"Error removing temp file {path}: {cleanup_err}")
+
 
 @app.route('/add_document', methods=['POST'])
 def add_document():
