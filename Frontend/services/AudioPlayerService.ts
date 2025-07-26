@@ -5,7 +5,7 @@ import Constants from 'expo-constants';
 
 // Import the same DEFAULT_API_URL from api.ts to ensure consistency
 // Import the same DEFAULT_API_URL from api.ts to ensure consistency
-const DEFAULT_API_URL = 'https://wishing-beside-exams-buf.trycloudflare.com';
+const DEFAULT_API_URL = 'https://reliable-infrared-plc-bl.trycloudflare.com';
 const API_URL = Constants.expoConfig?.extra?.apiUrl || DEFAULT_API_URL;
 
 // Base URL helper function that uses the same logic as api.ts

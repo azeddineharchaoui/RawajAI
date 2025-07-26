@@ -71,8 +71,6 @@ export default function InventoryScreen() {
       setProductsLoading(true);
       const response = await api.getProducts() as ProductsResponse;
       if (response && response.products) {
-        console.log(response.products);
-        
         setProducts(response.products);
       }
     } catch (error) {
@@ -101,6 +99,8 @@ export default function InventoryScreen() {
         lead_time: parseInt(leadTime) || 7,
         service_level: parseFloat(serviceLevel) || 0.95,
       });
+      // console.log(response);
+      
 
       setOptimizationData(response);
 
@@ -151,33 +151,6 @@ export default function InventoryScreen() {
       </html>
     `;
   };
-  //  Fake inventory items for demonstration
-  interface InventoryItemType {
-    id: string;
-    name: string;
-    quantity: number;
-    status: 'ok' | 'low' | 'out';
-  }
-  const fakeInventoryItems: InventoryItemType[] = [
-    {
-      id: 'SKU-1001',
-      name: 'Product A',
-      quantity: 120,
-      status: 'ok',
-    },
-    {
-      id: 'SKU-1002',
-      name: 'Product B',
-      quantity: 42,
-      status: 'low',
-    },
-    {
-      id: 'SKU-1003',
-      name: 'Product C',
-      quantity: 0,
-      status: 'out',
-    },
-  ];
 
   const renderTabs = () => (
     <View style={styles.tabContainer}>

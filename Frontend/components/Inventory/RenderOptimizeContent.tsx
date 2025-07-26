@@ -7,11 +7,40 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { ThemedText } from '@/components/ThemedText';
 
+type LocationProductBreakdown = {
+    smartphone: number;
+    laptop: number;
+    tablet: number;
+    headphones: number;
+    smartwatch: number;
+};
+
+type LocationDetails = {
+    capacity: number;
+    capacity_utilization: number;
+    total_inventory: number;
+    products: LocationProductBreakdown;
+};
+interface optimization_results {
+    status: string;
+    total_cost: number;
+    eoq?: number;
+    reorder_point?: number;
+    safety_stock?: number;
+    locations?: {
+        warehouse_a: LocationDetails;
+        warehouse_b: LocationDetails;
+        warehouse_c: LocationDetails;
+    };
+}
+
 interface OptimizationData {
+    optimization_results: optimization_results
     eoq?: number;
     reorder_point?: number;
     safety_stock?: number;
     total_cost?: number;
+    recommendations?: string;
 }
 
 interface OptimizeInventorySectionProps {
@@ -52,6 +81,10 @@ const OptimizeInventorySection: React.FC<OptimizeInventorySectionProps> = ({
 }) => {
     const colorScheme = useColorScheme();
     const colors = Colors[colorScheme ?? 'light'];
+    // console.log("gdhagdjhasgdjhasgdhgas");
+
+    console.log(optimizationData);
+
     return (
         <>
             <Card style={styles.formCard}>
@@ -126,7 +159,31 @@ const OptimizeInventorySection: React.FC<OptimizeInventorySectionProps> = ({
                     <ResultRow label="Economic Order Quantity" value={`${optimizationData.eoq?.toFixed(2) || '-'}`} unit="units" />
                     <ResultRow label="Reorder Point" value={`${optimizationData.reorder_point?.toFixed(2) || '-'}`} unit="units" />
                     <ResultRow label="Safety Stock" value={`${optimizationData.safety_stock?.toFixed(2) || '-'}`} unit="units" />
-                    <ResultRow label="Total Cost" value={`$${optimizationData.total_cost?.toFixed(2) || '-'}`} />
+                    <ResultRow label="Total Cost" value={`$${optimizationData.optimization_results.total_cost?.toFixed(2) || '-'}`} />
+
+                    <ThemedText
+                        type="subtitle"
+                        style={{
+                            marginTop: 16,
+                            fontWeight: 'bold',
+                            fontSize: 16,
+                            color: colors.tint,
+                        }}
+                    >
+                        Recommendations
+                    </ThemedText>
+
+                    {/* Styled recommendation content */}
+                    <ThemedText
+                        style={{
+                            marginTop: 8,
+                            fontSize: 19,
+                            lineHeight: 30,
+                            color: '#555',
+                        }}
+                    >
+                        {optimizationData.recommendations || 'No recommendations available.'}
+                    </ThemedText>
                 </Card>
             )}
 
